@@ -1,0 +1,11 @@
+# Python dependencies for RL Traffic Signal Control
+# Install with:  pip install -r requirements.txt
+#
+# NOTE: SUMO (including TraCI) must be installed separately:
+#       https://sumo.dlr.de/docs/Downloads.php
+#       After installing, set the SUMO_HOME environment variable, e.g.:
+#         Windows PowerShell: $env:SUMO_HOME = "C:\Program Files (x86)\Eclipse\Sumo"
+
+torch>=2.0.0
+numpy>=1.24.0
+matplotlib>=3.7.0
