@@ -168,8 +168,8 @@ def plot_comparison(rl_rewards, static_rewards,
     # Summary table
     improvement = (np.mean(rl_rewards) - np.mean(static_rewards)) / abs(np.mean(static_rewards)) * 100
     print("\n" + "=" * 50)
-    print(f"  RL Agent   — mean reward : {np.mean(rl_rewards):.1f} ± {np.std(rl_rewards):.1f}")
-    print(f"  Static     — mean reward : {np.mean(static_rewards):.1f} ± {np.std(static_rewards):.1f}")
+    print(f"  RL Agent   - mean reward : {np.mean(rl_rewards):.1f} +/- {np.std(rl_rewards):.1f}")
+    print(f"  Static     - mean reward : {np.mean(static_rewards):.1f} +/- {np.std(static_rewards):.1f}")
     print(f"  Improvement              : {improvement:+.1f}%")
     print("=" * 50)
 
@@ -181,12 +181,14 @@ if __name__ == "__main__":
                         help="Path to trained model checkpoint")
     parser.add_argument("--runs",   type=int, default=3,
                         help="Number of evaluation runs per controller")
+    parser.add_argument("--gui", dest="gui", action="store_true",
+                        help="Use SUMO-GUI (default behavior)")
     parser.add_argument("--no-gui", dest="gui", action="store_false",
                         help="Disable SUMO-GUI (headless)")
     parser.set_defaults(gui=True)
     args = parser.parse_args()
 
-    sumo_cfg = os.path.join("data", "sim_rl.sumocfg")
+    sumo_cfg = os.path.join("data", "new_sim.sumocfg")
 
     if not os.path.isfile(args.model):
         print(f"[ERROR] Model not found: {args.model}")

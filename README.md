@@ -12,10 +12,10 @@ By intelligently switching traffic light phases based on real-time queues and ve
  ┃ ┣ 📜 __init__.py
  ┃ ┗ 📜 dqn_agent.py         # Defines the Deep Q-Network and Replay Buffer.
  ┣ 📂 data
- ┃ ┣ 📜 intersection.net.xml # SUMO network topology (lanes, junctions).
- ┃ ┣ 📜 sim_flow.rou.xml     # Route/Flow definitions generating vehicle traffic.
- ┃ ┣ 📜 sim_rl.sumocfg       # Configuration file linking network & routes for SUMO.
- ┃ ┗ ...                     # Other SUMO related assets.
+ ┃ ┣ 📜 new_intersection.net.xml # SUMO network topology (lanes, junctions).
+ ┃ ┣ 📜 new_traffic.rou.xml      # Route/Flow definitions generating vehicle traffic.
+ ┃ ┣ 📜 new_sim.sumocfg          # Configuration file linking network & routes for SUMO.
+ ┃ ┗ ...                         # Other SUMO related assets.
  ┣ 📂 env
  ┃ ┣ 📜 __init__.py
  ┃ ┗ 📜 traffic_env.py       # Custom Gym-like Env wrapping SUMO via TraCI.

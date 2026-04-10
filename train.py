@@ -81,7 +81,7 @@ def plot_training(rewards, losses, save_path="training_results.png"):
 
 # ── Main training loop ────────────────────────────────────────────────────────
 def train(num_episodes: int = 200, use_gui: bool = False, resume: str = None):
-    sumo_cfg = os.path.join("data", "sim_rl.sumocfg")
+    sumo_cfg = os.path.join("data", "new_sim.sumocfg")
     ckpt_dir = "checkpoints"
     os.makedirs(ckpt_dir, exist_ok=True)
 
@@ -95,7 +95,7 @@ def train(num_episodes: int = 200, use_gui: bool = False, resume: str = None):
     best_reward = -float("inf")
 
     print(f"\n{'='*60}")
-    print(f"  DQN Traffic Signal Control — Training")
+    print(f"  DQN Traffic Signal Control - Training")
     print(f"  Episodes : {num_episodes}")
     print(f"  GUI      : {use_gui}")
     print(f"  Device   : {agent.device}")
@@ -123,11 +123,11 @@ def train(num_episodes: int = 200, use_gui: bool = False, resume: str = None):
         losses_log.append(avg_loss)
 
         # Console log
-        bar = "█" * int(30 * ep / num_episodes) + "░" * (30 - int(30 * ep / num_episodes))
+        bar = "=" * int(30 * ep / num_episodes) + "-" * (30 - int(30 * ep / num_episodes))
         print(
             f"  Ep {ep:>4}/{num_episodes}  [{bar}]  "
             f"reward={total_reward:>10.1f}  "
-            f"ε={agent.epsilon:.3f}  "
+            f"eps={agent.epsilon:.3f}  "
             f"loss={avg_loss:.4f}"
         )
 
