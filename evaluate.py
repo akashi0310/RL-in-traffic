@@ -37,6 +37,8 @@ import subprocess
 from env.traffic_env import TrafficEnv
 from agent.dqn_agent import DQNAgent
 
+REWARD_SCALE = 1e-3
+
 
 # ── RL evaluation ─────────────────────────────────────────────────────────────
 def run_rl(model_path: str, sumo_cfg: str, use_gui: bool, num_runs: int):
@@ -53,7 +55,7 @@ def run_rl(model_path: str, sumo_cfg: str, use_gui: bool, num_runs: int):
         while True:
             action = agent.select_action(state)
             state, reward, done, _ = env.step(action)
-            total_reward += reward
+            total_reward += reward * REWARD_SCALE
             if done:
                 break
         rewards.append(total_reward)
@@ -99,7 +101,7 @@ def run_static(sumo_cfg: str, use_gui: bool, num_runs: int):
         total_reward = 0.0
         for _ in range(max_sim_secs):
             traci.simulationStep()
-            total_reward -= sum(traci.lane.getWaitingTime(l) for l in lanes)
+            total_reward -= sum(traci.lane.getWaitingTime(l) for l in lanes) * REWARD_SCALE
 
         traci.close()
         proc.wait(timeout=10)

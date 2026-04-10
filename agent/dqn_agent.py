@@ -67,7 +67,7 @@ class DQNAgent:
         state_size: int,
         action_size: int,
         lr: float = 5e-4,
-        gamma: float = 0.99,
+        gamma: float = 0.95,
         epsilon_start: float = 1.0,
         epsilon_end: float = 0.01,
         epsilon_decay: float = 0.995,

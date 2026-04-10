@@ -29,6 +29,8 @@ import matplotlib.pyplot as plt
 from env.traffic_env import TrafficEnv
 from agent.dqn_agent import DQNAgent
 
+REWARD_SCALE = 1e-3
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def moving_average(values, window=10):
@@ -109,6 +111,7 @@ def train(num_episodes: int = 200, use_gui: bool = False, resume: str = None):
         while True:
             action              = agent.select_action(state)
             next_state, reward, done, _ = env.step(action)
+            reward *= REWARD_SCALE
             agent.store(state, action, reward, next_state, done)
             loss = agent.update()
             if loss is not None:
