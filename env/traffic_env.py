@@ -135,7 +135,8 @@ class TrafficEnv:
         )
 
     def _get_reward(self) -> float:
-        return -sum(traci.lane.getWaitingTime(l) for l in self.LANES)
+        # Using halting number (proxy for waiting time rate) is more stable than accumulated waiting time
+        return -sum(traci.lane.getLastStepHaltingNumber(l) for l in self.LANES)
 
     # ── Gym-style API ─────────────────────────────────────────────────────────
     def reset(self) -> np.ndarray:
@@ -151,18 +152,21 @@ class TrafficEnv:
         return self._get_state()
 
     def step(self, action: int):
+        reward = 0.0
+
         # 1. Optionally switch phases
         if action == 1 and self._phase_time >= self.MIN_GREEN:
             yellow = self.GREEN_PHASES[self._green_idx] + 1
             self._set_phase(yellow)
             for _ in range(self.YELLOW_DURATION):
                 traci.simulationStep()
+                reward += self._get_reward()  # Capture penalty during yellow
+
             self._green_idx = 1 - self._green_idx
             self._set_phase(self.GREEN_PHASES[self._green_idx])
             self._phase_time = 0.0
 
         # 2. Advance one RL timestep
-        reward = 0.0
         for _ in range(self.STEP_SIZE):
             traci.simulationStep()
             reward += self._get_reward()
