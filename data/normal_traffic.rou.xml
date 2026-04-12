@@ -5,36 +5,92 @@
     <vType id="bus" vClass="bus" accel="1.2" decel="2.5" sigma="0.5" length="12.0" maxSpeed="11.11" carFollowModel="Krauss"/>
     <vTypeDistribution id="mixed_traffic" vTypes="car truck bus" probabilities="0.6 0.2 0.2"/>
 
-    <!-- 
+    <!--
         NORMAL DISTRIBUTION APPROXIMATION:
         Traffic peaks around t=250s and tapers off at the start and end.
+        Split per direction: ~60% straight, ~25% right turn, ~15% left turn.
+        Gaussian shape: 10 -> 35 -> 60 -> 35 -> 10 (straight)
+                         4 -> 15 -> 25 -> 15 ->  4 (right)
+                         2 ->  9 -> 15 ->  9 ->  2 (left)
     -->
 
-    <!-- West to Center -->
-    <flow id="W_0" type="mixed_traffic" from="W2C" to="C2E" begin="0"   end="100" number="10" departLane="random" departSpeed="max"/>
-    <flow id="W_1" type="mixed_traffic" from="W2C" to="C2E" begin="100" end="200" number="35" departLane="random" departSpeed="max"/>
-    <flow id="W_2" type="mixed_traffic" from="W2C" to="C2E" begin="200" end="300" number="60" departLane="random" departSpeed="max"/>
-    <flow id="W_3" type="mixed_traffic" from="W2C" to="C2E" begin="300" end="400" number="35" departLane="random" departSpeed="max"/>
-    <flow id="W_4" type="mixed_traffic" from="W2C" to="C2E" begin="400" end="500" number="10" departLane="random" departSpeed="max"/>
+    <!-- ── West ──────────────────────────────────────────────── -->
+    <!-- W straight: W2C -> C2E -->
+    <flow id="W_s0" type="mixed_traffic" from="W2C" to="C2E" begin="0"   end="100" number="10" departLane="best" departSpeed="max"/>
+    <flow id="W_s1" type="mixed_traffic" from="W2C" to="C2E" begin="100" end="200" number="35" departLane="best" departSpeed="max"/>
+    <flow id="W_s2" type="mixed_traffic" from="W2C" to="C2E" begin="200" end="300" number="60" departLane="best" departSpeed="max"/>
+    <flow id="W_s3" type="mixed_traffic" from="W2C" to="C2E" begin="300" end="400" number="35" departLane="best" departSpeed="max"/>
+    <flow id="W_s4" type="mixed_traffic" from="W2C" to="C2E" begin="400" end="500" number="10" departLane="best" departSpeed="max"/>
+    <!-- W right turn: W2C -> C2S -->
+    <flow id="W_r0" type="mixed_traffic" from="W2C" to="C2S" begin="0"   end="100" number="4"  departLane="best" departSpeed="max"/>
+    <flow id="W_r1" type="mixed_traffic" from="W2C" to="C2S" begin="100" end="200" number="15" departLane="best" departSpeed="max"/>
+    <flow id="W_r2" type="mixed_traffic" from="W2C" to="C2S" begin="200" end="300" number="25" departLane="best" departSpeed="max"/>
+    <flow id="W_r3" type="mixed_traffic" from="W2C" to="C2S" begin="300" end="400" number="15" departLane="best" departSpeed="max"/>
+    <flow id="W_r4" type="mixed_traffic" from="W2C" to="C2S" begin="400" end="500" number="4"  departLane="best" departSpeed="max"/>
+    <!-- W left turn: W2C -> C2N -->
+    <flow id="W_l0" type="mixed_traffic" from="W2C" to="C2N" begin="0"   end="100" number="2"  departLane="best" departSpeed="max"/>
+    <flow id="W_l1" type="mixed_traffic" from="W2C" to="C2N" begin="100" end="200" number="9"  departLane="best" departSpeed="max"/>
+    <flow id="W_l2" type="mixed_traffic" from="W2C" to="C2N" begin="200" end="300" number="15" departLane="best" departSpeed="max"/>
+    <flow id="W_l3" type="mixed_traffic" from="W2C" to="C2N" begin="300" end="400" number="9"  departLane="best" departSpeed="max"/>
+    <flow id="W_l4" type="mixed_traffic" from="W2C" to="C2N" begin="400" end="500" number="2"  departLane="best" departSpeed="max"/>
 
-    <!-- East to Center -->
-    <flow id="E_0" type="mixed_traffic" from="E2C" to="C2W" begin="0"   end="100" number="10" departLane="random" departSpeed="max"/>
-    <flow id="E_1" type="mixed_traffic" from="E2C" to="C2W" begin="100" end="200" number="35" departLane="random" departSpeed="max"/>
-    <flow id="E_2" type="mixed_traffic" from="E2C" to="C2W" begin="200" end="300" number="60" departLane="random" departSpeed="max"/>
-    <flow id="E_3" type="mixed_traffic" from="E2C" to="C2W" begin="300" end="400" number="35" departLane="random" departSpeed="max"/>
-    <flow id="E_4" type="mixed_traffic" from="E2C" to="C2W" begin="400" end="500" number="10" departLane="random" departSpeed="max"/>
+    <!-- ── East ──────────────────────────────────────────────── -->
+    <!-- E straight: E2C -> C2W -->
+    <flow id="E_s0" type="mixed_traffic" from="E2C" to="C2W" begin="0"   end="100" number="10" departLane="best" departSpeed="max"/>
+    <flow id="E_s1" type="mixed_traffic" from="E2C" to="C2W" begin="100" end="200" number="35" departLane="best" departSpeed="max"/>
+    <flow id="E_s2" type="mixed_traffic" from="E2C" to="C2W" begin="200" end="300" number="60" departLane="best" departSpeed="max"/>
+    <flow id="E_s3" type="mixed_traffic" from="E2C" to="C2W" begin="300" end="400" number="35" departLane="best" departSpeed="max"/>
+    <flow id="E_s4" type="mixed_traffic" from="E2C" to="C2W" begin="400" end="500" number="10" departLane="best" departSpeed="max"/>
+    <!-- E right turn: E2C -> C2N -->
+    <flow id="E_r0" type="mixed_traffic" from="E2C" to="C2N" begin="0"   end="100" number="4"  departLane="best" departSpeed="max"/>
+    <flow id="E_r1" type="mixed_traffic" from="E2C" to="C2N" begin="100" end="200" number="15" departLane="best" departSpeed="max"/>
+    <flow id="E_r2" type="mixed_traffic" from="E2C" to="C2N" begin="200" end="300" number="25" departLane="best" departSpeed="max"/>
+    <flow id="E_r3" type="mixed_traffic" from="E2C" to="C2N" begin="300" end="400" number="15" departLane="best" departSpeed="max"/>
+    <flow id="E_r4" type="mixed_traffic" from="E2C" to="C2N" begin="400" end="500" number="4"  departLane="best" departSpeed="max"/>
+    <!-- E left turn: E2C -> C2S -->
+    <flow id="E_l0" type="mixed_traffic" from="E2C" to="C2S" begin="0"   end="100" number="2"  departLane="best" departSpeed="max"/>
+    <flow id="E_l1" type="mixed_traffic" from="E2C" to="C2S" begin="100" end="200" number="9"  departLane="best" departSpeed="max"/>
+    <flow id="E_l2" type="mixed_traffic" from="E2C" to="C2S" begin="200" end="300" number="15" departLane="best" departSpeed="max"/>
+    <flow id="E_l3" type="mixed_traffic" from="E2C" to="C2S" begin="300" end="400" number="9"  departLane="best" departSpeed="max"/>
+    <flow id="E_l4" type="mixed_traffic" from="E2C" to="C2S" begin="400" end="500" number="2"  departLane="best" departSpeed="max"/>
 
-    <!-- North to Center -->
-    <flow id="N_0" type="mixed_traffic" from="N2C" to="C2S" begin="0"   end="100" number="10" departLane="random" departSpeed="max"/>
-    <flow id="N_1" type="mixed_traffic" from="N2C" to="C2S" begin="100" end="200" number="35" departLane="random" departSpeed="max"/>
-    <flow id="N_2" type="mixed_traffic" from="N2C" to="C2S" begin="200" end="300" number="60" departLane="random" departSpeed="max"/>
-    <flow id="N_3" type="mixed_traffic" from="N2C" to="C2S" begin="300" end="400" number="35" departLane="random" departSpeed="max"/>
-    <flow id="N_4" type="mixed_traffic" from="N2C" to="C2S" begin="400" end="500" number="10" departLane="random" departSpeed="max"/>
+    <!-- ── North ─────────────────────────────────────────────── -->
+    <!-- N straight: N2C -> C2S -->
+    <flow id="N_s0" type="mixed_traffic" from="N2C" to="C2S" begin="0"   end="100" number="10" departLane="best" departSpeed="max"/>
+    <flow id="N_s1" type="mixed_traffic" from="N2C" to="C2S" begin="100" end="200" number="35" departLane="best" departSpeed="max"/>
+    <flow id="N_s2" type="mixed_traffic" from="N2C" to="C2S" begin="200" end="300" number="60" departLane="best" departSpeed="max"/>
+    <flow id="N_s3" type="mixed_traffic" from="N2C" to="C2S" begin="300" end="400" number="35" departLane="best" departSpeed="max"/>
+    <flow id="N_s4" type="mixed_traffic" from="N2C" to="C2S" begin="400" end="500" number="10" departLane="best" departSpeed="max"/>
+    <!-- N right turn: N2C -> C2W -->
+    <flow id="N_r0" type="mixed_traffic" from="N2C" to="C2W" begin="0"   end="100" number="4"  departLane="best" departSpeed="max"/>
+    <flow id="N_r1" type="mixed_traffic" from="N2C" to="C2W" begin="100" end="200" number="15" departLane="best" departSpeed="max"/>
+    <flow id="N_r2" type="mixed_traffic" from="N2C" to="C2W" begin="200" end="300" number="25" departLane="best" departSpeed="max"/>
+    <flow id="N_r3" type="mixed_traffic" from="N2C" to="C2W" begin="300" end="400" number="15" departLane="best" departSpeed="max"/>
+    <flow id="N_r4" type="mixed_traffic" from="N2C" to="C2W" begin="400" end="500" number="4"  departLane="best" departSpeed="max"/>
+    <!-- N left turn: N2C -> C2E -->
+    <flow id="N_l0" type="mixed_traffic" from="N2C" to="C2E" begin="0"   end="100" number="2"  departLane="best" departSpeed="max"/>
+    <flow id="N_l1" type="mixed_traffic" from="N2C" to="C2E" begin="100" end="200" number="9"  departLane="best" departSpeed="max"/>
+    <flow id="N_l2" type="mixed_traffic" from="N2C" to="C2E" begin="200" end="300" number="15" departLane="best" departSpeed="max"/>
+    <flow id="N_l3" type="mixed_traffic" from="N2C" to="C2E" begin="300" end="400" number="9"  departLane="best" departSpeed="max"/>
+    <flow id="N_l4" type="mixed_traffic" from="N2C" to="C2E" begin="400" end="500" number="2"  departLane="best" departSpeed="max"/>
 
-    <!-- South to Center -->
-    <flow id="S_0" type="mixed_traffic" from="S2C" to="C2N" begin="0"   end="100" number="10" departLane="random" departSpeed="max"/>
-    <flow id="S_1" type="mixed_traffic" from="S2C" to="C2N" begin="100" end="200" number="35" departLane="random" departSpeed="max"/>
-    <flow id="S_2" type="mixed_traffic" from="S2C" to="C2N" begin="200" end="300" number="60" departLane="random" departSpeed="max"/>
-    <flow id="S_3" type="mixed_traffic" from="S2C" to="C2N" begin="300" end="400" number="35" departLane="random" departSpeed="max"/>
-    <flow id="S_4" type="mixed_traffic" from="S2C" to="C2N" begin="400" end="500" number="10" departLane="random" departSpeed="max"/>
+    <!-- ── South ─────────────────────────────────────────────── -->
+    <!-- S straight: S2C -> C2N -->
+    <flow id="S_s0" type="mixed_traffic" from="S2C" to="C2N" begin="0"   end="100" number="10" departLane="best" departSpeed="max"/>
+    <flow id="S_s1" type="mixed_traffic" from="S2C" to="C2N" begin="100" end="200" number="35" departLane="best" departSpeed="max"/>
+    <flow id="S_s2" type="mixed_traffic" from="S2C" to="C2N" begin="200" end="300" number="60" departLane="best" departSpeed="max"/>
+    <flow id="S_s3" type="mixed_traffic" from="S2C" to="C2N" begin="300" end="400" number="35" departLane="best" departSpeed="max"/>
+    <flow id="S_s4" type="mixed_traffic" from="S2C" to="C2N" begin="400" end="500" number="10" departLane="best" departSpeed="max"/>
+    <!-- S right turn: S2C -> C2E -->
+    <flow id="S_r0" type="mixed_traffic" from="S2C" to="C2E" begin="0"   end="100" number="4"  departLane="best" departSpeed="max"/>
+    <flow id="S_r1" type="mixed_traffic" from="S2C" to="C2E" begin="100" end="200" number="15" departLane="best" departSpeed="max"/>
+    <flow id="S_r2" type="mixed_traffic" from="S2C" to="C2E" begin="200" end="300" number="25" departLane="best" departSpeed="max"/>
+    <flow id="S_r3" type="mixed_traffic" from="S2C" to="C2E" begin="300" end="400" number="15" departLane="best" departSpeed="max"/>
+    <flow id="S_r4" type="mixed_traffic" from="S2C" to="C2E" begin="400" end="500" number="4"  departLane="best" departSpeed="max"/>
+    <!-- S left turn: S2C -> C2W -->
+    <flow id="S_l0" type="mixed_traffic" from="S2C" to="C2W" begin="0"   end="100" number="2"  departLane="best" departSpeed="max"/>
+    <flow id="S_l1" type="mixed_traffic" from="S2C" to="C2W" begin="100" end="200" number="9"  departLane="best" departSpeed="max"/>
+    <flow id="S_l2" type="mixed_traffic" from="S2C" to="C2W" begin="200" end="300" number="15" departLane="best" departSpeed="max"/>
+    <flow id="S_l3" type="mixed_traffic" from="S2C" to="C2W" begin="300" end="400" number="9"  departLane="best" departSpeed="max"/>
+    <flow id="S_l4" type="mixed_traffic" from="S2C" to="C2W" begin="400" end="500" number="2"  departLane="best" departSpeed="max"/>
 </routes>
