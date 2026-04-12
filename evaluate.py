@@ -37,7 +37,7 @@ if "SUMO_HOME" in os.environ:
 import traci
 import subprocess
 
-from env.traffic_env import TrafficEnv, SCENARIOS
+from env.traffic_env import TrafficEnv, SCENARIOS, compute_reward
 from agent.dqn_agent import DQNAgent
 
 REWARD_SCALE = 1e-3
@@ -45,10 +45,11 @@ REWARD_SCALE = 1e-3
 
 # -- RL evaluation -------------------------------------------------------------
 def run_rl(model_path: str, sumo_cfg: str, use_gui: bool, num_runs: int,
-           scenario: str):
+           scenario: str, bernoulli_p: float = 0.05, reward_mode: str = "wait"):
     print(f"\n--- RL Agent | {scenario} ({num_runs} run(s)) ---")
     env = TrafficEnv(sumo_cfg=sumo_cfg, use_gui=use_gui, port=8813,
-                     scenarios=[scenario])
+                     scenarios=[scenario], bernoulli_p=bernoulli_p,
+                     reward_mode=reward_mode)
     agent = DQNAgent(state_size=env.state_size, action_size=env.action_size)
     agent.load(model_path)
     agent.epsilon = 0.0
@@ -70,7 +71,8 @@ def run_rl(model_path: str, sumo_cfg: str, use_gui: bool, num_runs: int,
 
 
 # -- Static controller evaluation ----------------------------------------------
-def run_static(sumo_cfg: str, use_gui: bool, num_runs: int, scenario: str):
+def run_static(sumo_cfg: str, use_gui: bool, num_runs: int, scenario: str,
+               reward_mode: str = "wait"):
     print(f"\n--- Static Controller | {scenario} ({num_runs} run(s)) ---")
     sumo_cfg_abs = os.path.abspath(sumo_cfg)
     sumo_dir     = os.path.dirname(sumo_cfg_abs)
@@ -105,9 +107,8 @@ def run_static(sumo_cfg: str, use_gui: bool, num_runs: int, scenario: str):
         total_reward = 0.0
         for _ in range(max_sim_secs):
             traci.simulationStep()
-            total_reward -= sum(
-                traci.lane.getLastStepHaltingNumber(l) for l in lanes
-            ) * REWARD_SCALE
+            step_reward = compute_reward(lanes, TrafficEnv.LEFT_LANES, mode=reward_mode)
+            total_reward += step_reward * REWARD_SCALE
 
         traci.close()
         proc.wait(timeout=10)
@@ -170,7 +171,7 @@ if __name__ == "__main__":
         description="Evaluate RL vs Static controller across scenarios")
     parser.add_argument("--model", type=str, default="checkpoints/dqn_best.pt",
                         help="Path to trained model checkpoint")
-    parser.add_argument("--runs", type=int, default=3,
+    parser.add_argument("--runs", type=int, default=1,
                         help="Number of evaluation runs per scenario")
     parser.add_argument("--gui", dest="gui", action="store_true",
                         help="Use SUMO-GUI")
@@ -178,8 +179,12 @@ if __name__ == "__main__":
                         help="Disable SUMO-GUI (headless)")
     parser.add_argument("--scenarios", nargs="+",
                         default=["normal", "crowded_all", "crowded_ns",
-                                 "crowded_ew", "fluctuate"],
+                                 "crowded_ew", "fluctuate", "bernoulli"],
                         help="Scenarios to evaluate")
+    parser.add_argument("--prob", type=float, default=0.04,
+                        help="Bernoulli spawn probability for 'bernoulli' scenario")
+    parser.add_argument("--reward-mode", type=str, default="wait", choices=["wait", "count"],
+                        help="Reward metric for evaluation")
     parser.set_defaults(gui=True)
     args = parser.parse_args()
 
@@ -195,8 +200,10 @@ if __name__ == "__main__":
         if scenario not in SCENARIOS:
             print(f"[WARN] Unknown scenario '{scenario}', skipping.")
             continue
-        rl_rewards = run_rl(args.model, sumo_cfg, args.gui, args.runs, scenario)
-        static_rewards = run_static(sumo_cfg, args.gui, args.runs, scenario)
+        rl_rewards = run_rl(args.model, sumo_cfg, args.gui, args.runs, scenario,
+                            bernoulli_p=args.prob, reward_mode=args.reward_mode)
+        static_rewards = run_static(sumo_cfg, args.gui, args.runs, scenario,
+                                    reward_mode=args.reward_mode)
         results[scenario] = {"rl": rl_rewards, "static": static_rewards}
 
         # Per-scenario summary

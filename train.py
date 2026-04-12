@@ -52,6 +52,7 @@ SCENARIO_COLORS = {
     "crowded_single.rou.xml":        "#a6e3a1",   # green
     "crowded_single_ew.rou.xml":     "#fab387",   # orange
     "crowded_fluctuate.rou.xml":     "#cba6f7",   # purple
+    "bernoulli.rou.xml":             "#94e2d5",   # teal
 }
 
 SCENARIO_LABELS = {
@@ -60,6 +61,7 @@ SCENARIO_LABELS = {
     "crowded_single.rou.xml":        "crowded_ns",
     "crowded_single_ew.rou.xml":     "crowded_ew",
     "crowded_fluctuate.rou.xml":     "fluctuate",
+    "bernoulli.rou.xml":             "bernoulli",
 }
 
 
@@ -124,13 +126,15 @@ def plot_training(scenario_rewards, losses, save_path="training_results.png"):
 
 # -- Main training loop -------------------------------------------------------
 def train(num_episodes: int = 200, use_gui: bool = False, resume: str = None,
-          scenarios: list = None):
+          scenarios: list = None, bernoulli_p: float = 0.05, 
+          reward_mode: str = "wait"):
     sumo_cfg = os.path.join("data", "new_sim.sumocfg")
     ckpt_dir = "checkpoints"
     os.makedirs(ckpt_dir, exist_ok=True)
 
     env   = TrafficEnv(sumo_cfg=sumo_cfg, use_gui=use_gui, port=8813,
-                       scenarios=scenarios)
+                       scenarios=scenarios, bernoulli_p=bernoulli_p,
+                       reward_mode=reward_mode)
     agent = DQNAgent(state_size=env.state_size, action_size=env.action_size)
 
     if resume and os.path.isfile(resume):
@@ -202,7 +206,7 @@ def train(num_episodes: int = 200, use_gui: bool = False, resume: str = None,
 # -- Entry point ---------------------------------------------------------------
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train DQN traffic signal agent")
-    parser.add_argument("--episodes", type=int, default=200,
+    parser.add_argument("--episodes", type=int, default=100,
                         help="Number of training episodes (default: 200)")
     parser.add_argument("--gui", action="store_true",
                         help="Use SUMO-GUI (slow but visual)")
@@ -211,8 +215,13 @@ if __name__ == "__main__":
     parser.add_argument("--scenarios", nargs="+", default=["all"],
                         help="Scenarios to mix during training "
                              "(default: all). Options: normal, crowded_all, "
-                             "crowded_ns, crowded_ew, fluctuate, all")
+                             "crowded_ns, crowded_ew, fluctuate, bernoulli, all")
+    parser.add_argument("--prob", type=float, default=0.05,
+                        help="Bernoulli spawn probability per lane (default: 0.05)")
+    parser.add_argument("--reward-mode", type=str, default="wait", choices=["wait", "count"],
+                        help="Reward metric: 'wait' for waiting time, 'count' for halting vehicles")
     args = parser.parse_args()
 
     train(num_episodes=args.episodes, use_gui=args.gui, resume=args.resume,
-          scenarios=args.scenarios)
+          scenarios=args.scenarios, bernoulli_p=args.prob,
+          reward_mode=args.reward_mode)

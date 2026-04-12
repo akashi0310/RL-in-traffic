@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<routes>
+    <vType id="car" vClass="passenger" accel="2.6" decel="4.5" sigma="0.5" length="5.0" maxSpeed="13.89" carFollowModel="Krauss"/>
+    <vType id="truck" vClass="truck" accel="1.2" decel="2.5" sigma="0.5" length="10.0" maxSpeed="11.11" carFollowModel="Krauss"/>
+    <vType id="bus" vClass="bus" accel="1.2" decel="2.5" sigma="0.5" length="12.0" maxSpeed="11.11" carFollowModel="Krauss"/>
+    <vTypeDistribution id="mixed_traffic" vTypes="car truck bus" probabilities="0.6 0.2 0.2"/>
+
+    <route id="W2C_s" edges="W2C C2E"/>
+    <route id="W2C_r" edges="W2C C2S"/>
+    <route id="W2C_l" edges="W2C C2N"/>
+    <routeDistribution id="W2C_sr" routes="W2C_s W2C_r" probabilities="0.7 0.3"/>
+    <flow id="flow_W2C_0" route="W2C_sr" type="mixed_traffic" begin="0" end="500" probability="0.25" departLane="0" departSpeed="max"/>
+    <flow id="flow_W2C_1" route="W2C_sr" type="mixed_traffic" begin="0" end="500" probability="0.25" departLane="1" departSpeed="max"/>
+    <flow id="flow_W2C_2" route="W2C_l" type="mixed_traffic" begin="0" end="500" probability="0.25" departLane="2" departSpeed="max"/>
+    <route id="E2C_s" edges="E2C C2W"/>
+    <route id="E2C_r" edges="E2C C2N"/>
+    <route id="E2C_l" edges="E2C C2S"/>
+    <routeDistribution id="E2C_sr" routes="E2C_s E2C_r" probabilities="0.7 0.3"/>
+    <flow id="flow_E2C_0" route="E2C_sr" type="mixed_traffic" begin="0" end="500" probability="0.25" departLane="0" departSpeed="max"/>
+    <flow id="flow_E2C_1" route="E2C_sr" type="mixed_traffic" begin="0" end="500" probability="0.25" departLane="1" departSpeed="max"/>
+    <flow id="flow_E2C_2" route="E2C_l" type="mixed_traffic" begin="0" end="500" probability="0.25" departLane="2" departSpeed="max"/>
+    <route id="N2C_s" edges="N2C C2S"/>
+    <route id="N2C_r" edges="N2C C2W"/>
+    <route id="N2C_l" edges="N2C C2E"/>
+    <routeDistribution id="N2C_sr" routes="N2C_s N2C_r" probabilities="0.7 0.3"/>
+    <flow id="flow_N2C_0" route="N2C_sr" type="mixed_traffic" begin="0" end="500" probability="0.25" departLane="0" departSpeed="max"/>
+    <flow id="flow_N2C_1" route="N2C_sr" type="mixed_traffic" begin="0" end="500" probability="0.25" departLane="1" departSpeed="max"/>
+    <flow id="flow_N2C_2" route="N2C_l" type="mixed_traffic" begin="0" end="500" probability="0.25" departLane="2" departSpeed="max"/>
+    <route id="S2C_s" edges="S2C C2N"/>
+    <route id="S2C_r" edges="S2C C2E"/>
+    <route id="S2C_l" edges="S2C C2W"/>
+    <routeDistribution id="S2C_sr" routes="S2C_s S2C_r" probabilities="0.7 0.3"/>
+    <flow id="flow_S2C_0" route="S2C_sr" type="mixed_traffic" begin="0" end="500" probability="0.25" departLane="0" departSpeed="max"/>
+    <flow id="flow_S2C_1" route="S2C_sr" type="mixed_traffic" begin="0" end="500" probability="0.25" departLane="1" departSpeed="max"/>
+    <flow id="flow_S2C_2" route="S2C_l" type="mixed_traffic" begin="0" end="500" probability="0.25" departLane="2" departSpeed="max"/>
+</routes>

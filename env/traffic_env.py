@@ -56,7 +56,30 @@ SCENARIOS = {
     "crowded_ns":  "crowded_single.rou.xml",
     "crowded_ew":  "crowded_single_ew.rou.xml",
     "fluctuate":   "crowded_fluctuate.rou.xml",
+    "bernoulli":   "bernoulli.rou.xml",
 }
+
+
+def compute_reward(lanes: list, left_lanes: list, mode: str = "wait") -> float:
+    """
+    Standardized reward function shared between Environment and Evaluation.
+    
+    Modes:
+    - 'wait': Negative cumulative waiting time (seconds)
+    - 'count': Negative number of halting vehicles
+    """
+    reward = 0.0
+    for l in lanes:
+        if mode == "wait":
+            val = traci.lane.getWaitingTime(l)
+        else:  # "count"
+            val = traci.lane.getLastStepHaltingNumber(l)
+
+        if l in left_lanes:
+            reward -= val * 1.5
+        else:
+            reward -= val
+    return reward
 
 
 class TrafficEnv:
@@ -67,15 +90,18 @@ class TrafficEnv:
                    ["E2C_2", "W2C_2"]]
     ALL_LANES = [l for group in LANE_GROUPS for l in group]
     TL_ID = "center"
+    LEFT_LANES = ["N2C_2", "S2C_2", "E2C_2", "W2C_2"]
     NUM_PHASES = 4
     GREEN_PHASES = [0, 2, 4, 6]    # indices of green phases in tlLogic
     YELLOW_DURATION = 3            # sim-seconds for yellow phase
     MIN_GREEN = 10                 # min green seconds before switch allowed
-    STEP_SIZE = 5                  # sim-seconds per RL action step
-    MAX_STEPS = 100                # 100 x 5 s = 500 s per episode
+    STEP_SIZE = 10                 # T=10 sim-seconds per RL action step
+    MAX_STEPS = 50                 # 50 x 10 s = 500 s per episode
+    GAMMA = 0.99                   # Discount factor for sim-steps
 
     def __init__(self, sumo_cfg: str, use_gui: bool = False, port: int = 8813,
-                 scenarios: list = None):
+                 scenarios: list = None, bernoulli_p: float = 0.05,
+                 reward_mode: str = "wait"):
         """
         Parameters
         ----------
@@ -88,13 +114,19 @@ class TrafficEnv:
         scenarios : list of str or None
             Scenario names to sample from on each reset().
             Valid names: "normal", "crowded_all", "crowded_ns", "crowded_ew",
-                         "fluctuate", or "all" (uses every scenario).
+                         "fluctuate", "bernoulli", or "all" (uses every scenario).
             If None or empty, uses the route file from the .sumocfg as-is.
+        bernoulli_p : float
+            Spawning probability per lane per second for 'bernoulli' scenario.
+        reward_mode : str
+            'wait' (waiting time) or 'count' (halting vehicles).
         """
         self.sumo_cfg = os.path.abspath(sumo_cfg)
         self.sumo_dir = os.path.dirname(self.sumo_cfg)
         self.use_gui = use_gui
         self.port = port
+        self.bernoulli_p = bernoulli_p
+        self.reward_mode = reward_mode
         self._connected = False
         self._step = 0
         self._phase_time = 0.0
@@ -139,6 +171,11 @@ class TrafficEnv:
         if self._route_files:
             route = random.choice(self._route_files)
             self._current_scenario = route
+            
+            # Dynamically generate Bernoulli routes if selected
+            if route == "bernoulli.rou.xml":
+                self._generate_bernoulli_routes()
+                
             cmd += ["--route-files", route]
 
         if self.use_gui:
@@ -178,6 +215,52 @@ class TrafficEnv:
         traci.trafficlight.setPhase(self.TL_ID, phase_idx)
         traci.trafficlight.setPhaseDuration(self.TL_ID, 999_999)
 
+    def _generate_bernoulli_routes(self):
+        """Generate a Bernoulli distribution route file where each lane independently spawns vehicles."""
+        filepath = os.path.join(self.sumo_dir, "bernoulli.rou.xml")
+        end_time = self.MAX_STEPS * self.STEP_SIZE
+        
+        # Directions: from -> [straight, right, left]
+        directions = {
+            "W2C": ["C2E", "C2S", "C2N"],
+            "E2C": ["C2W", "C2N", "C2S"],
+            "N2C": ["C2S", "C2W", "C2E"],
+            "S2C": ["C2N", "C2E", "C2W"]
+        }
+        
+        with open(filepath, "w") as f:
+            f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+            f.write('<routes>\n')
+            f.write('    <vType id="car" vClass="passenger" accel="2.6" decel="4.5" sigma="0.5" length="5.0" maxSpeed="13.89" carFollowModel="Krauss"/>\n')
+            f.write('    <vType id="truck" vClass="truck" accel="1.2" decel="2.5" sigma="0.5" length="10.0" maxSpeed="11.11" carFollowModel="Krauss"/>\n')
+            f.write('    <vType id="bus" vClass="bus" accel="1.2" decel="2.5" sigma="0.5" length="12.0" maxSpeed="11.11" carFollowModel="Krauss"/>\n')
+            f.write('    <vTypeDistribution id="mixed_traffic" vTypes="car truck bus" probabilities="0.6 0.2 0.2"/>\n\n')
+            
+            for src_edge, dests in directions.items():
+                # Define routes
+                f.write(f'    <route id="{src_edge}_s" edges="{src_edge} {dests[0]}"/>\n')
+                f.write(f'    <route id="{src_edge}_r" edges="{src_edge} {dests[1]}"/>\n')
+                f.write(f'    <route id="{src_edge}_l" edges="{src_edge} {dests[2]}"/>\n')
+                
+                # Distributions
+                # 0 & 1: Straight and Right (approx 70/30 of the 85% total flow)
+                f.write(f'    <routeDistribution id="{src_edge}_sr" routes="{src_edge}_s {src_edge}_r" probabilities="0.7 0.3"/>\n')
+                
+                # Flow for Lane 0 (Straight/Right)
+                f.write(f'    <flow id="flow_{src_edge}_0" route="{src_edge}_sr" type="mixed_traffic" '
+                        f'begin="0" end="{end_time}" probability="{self.bernoulli_p}" '
+                        f'departLane="0" departSpeed="max"/>\n')
+                # Flow for Lane 1 (Straight/Right)
+                f.write(f'    <flow id="flow_{src_edge}_1" route="{src_edge}_sr" type="mixed_traffic" '
+                        f'begin="0" end="{end_time}" probability="{self.bernoulli_p}" '
+                        f'departLane="1" departSpeed="max"/>\n')
+                # Flow for Lane 2 (Left Turn only)
+                f.write(f'    <flow id="flow_{src_edge}_2" route="{src_edge}_l" type="mixed_traffic" '
+                        f'begin="0" end="{end_time}" probability="{self.bernoulli_p}" '
+                        f'departLane="2" departSpeed="max"/>\n')
+            
+            f.write('</routes>\n')
+
     # -- State & reward --------------------------------------------------------
     def _get_state(self) -> np.ndarray:
         queues, speeds = [], []
@@ -195,7 +278,7 @@ class TrafficEnv:
         )
 
     def _get_reward(self) -> float:
-        return -sum(traci.lane.getLastStepHaltingNumber(l) for l in self.ALL_LANES)
+        return compute_reward(self.ALL_LANES, self.LEFT_LANES, mode=self.reward_mode)
 
     # -- Gym-style API ---------------------------------------------------------
     def reset(self) -> np.ndarray:
@@ -216,17 +299,23 @@ class TrafficEnv:
         if action != 0 and self._phase_time >= self.MIN_GREEN:
             yellow = self.GREEN_PHASES[self._green_idx] + 1
             self._set_phase(yellow)
-            for _ in range(self.YELLOW_DURATION):
+            for t in range(self.YELLOW_DURATION):
                 traci.simulationStep()
-                reward += self._get_reward()
+                # Apply step-level discounting: total_reward = sum(gamma^t * r_t)
+                reward += (self.GAMMA ** t) * self._get_reward()
 
             self._green_idx = (self._green_idx + action) % self.NUM_PHASES
             self._set_phase(self.GREEN_PHASES[self._green_idx])
             self._phase_time = 0.0
 
-        for _ in range(self.STEP_SIZE):
+        for t in range(self.STEP_SIZE):
             traci.simulationStep()
-            reward += self._get_reward()
+            # If a yellow light occurred, we continue the discount power index appropriately.
+            # However, for simplicity and alignment with standard MDP discretization, 
+            # we reset the discount index for the new main action duration or 
+            # continue it if we consider the whole step() as one interval.
+            # Using t as the index for the duration of this action phase:
+            reward += (self.GAMMA ** t) * self._get_reward()
 
         self._phase_time += self.STEP_SIZE
         self._step += 1

@@ -11,7 +11,7 @@
     </time>
     <processing>
         <ignore-junction-blocker value="20"/>
-        <time-to-teleport value="300"/>
+        <time-to-teleport value="-1"/>
     </processing>
     <report>
         <no-step-log value="true"/>

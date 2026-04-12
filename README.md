@@ -19,6 +19,7 @@ By intelligently switching traffic light phases based on real-time queues and ve
  ┃ ┣ 📜 crowded_single.rou.xml    # N-S heavy, E-W light.
  ┃ ┣ 📜 crowded_single_ew.rou.xml # E-W heavy, N-S light.
  ┃ ┣ 📜 crowded_fluctuate.rou.xml # Alternating N-S / E-W heavy every 100s.
+ ┃ ┣ 📜 bernoulli.rou.xml         # [Auto-generated] Bernoulli spawn per lane.
  ┃ ┗ ...                          # Other SUMO related assets.
  ┣ 📂 env
  ┃ ┣ 📜 __init__.py
@@ -33,13 +34,16 @@ By intelligently switching traffic light phases based on real-time queues and ve
 ## 🔄 System Workflow & Logic
 
 1. **Environment (SUMO via TraCI)**: 
-   The intersection receives approaching traffic from 4 directions. The state observed by the RL agent is a **10-dimensional vector**, which includes:
-   * Vehicle queues (number of halted vehicles normalized) for each lane group.
-   * Mean vehicle speed for each lane group.
-   * Current active green phase.
-   * Elapsed time in the current phase.
+    The intersection receives approaching traffic from 4 directions. The state observed by the RL agent is a **10-dimensional vector**, which includes:
+    * Vehicle queues (number of halted vehicles normalized) for each lane group.
+    * Mean vehicle speed for each lane group.
+    * Current active green phase.
+    * Elapsed time in the current phase (normalized).
 
-2. **Traffic Light Phases**:
+2. **Action Timing ($T=10$)**:
+   The agent makes a control decision every **10 simulation seconds**. This provides enough time for a phase change (including a 3-second yellow light) to impact traffic flow significantly.
+
+3. **Traffic Light Phases**:
    The intersection has 4 controllable green phases:
    | Phase | Lanes served | Description |
    |-------|-------------|-------------|
@@ -48,29 +52,34 @@ By intelligently switching traffic light phases based on real-time queues and ve
    | 2 | N2C_2, S2C_2 | N-S left turn only |
    | 3 | E2C_2, W2C_2 | E-W left turn only |
 
-3. **Agent (DQN)**: 
-   The agent processes the 10-dimensional state through a Two-Hidden-Layer MLP and predicts Q-values for 4 possible actions:
-   * `0`: Stay at current green phase.
-   * `1`: Forward — switch to next phase (+1 mod 4).
-   * `2`: Diagonal — switch to opposite phase (+2 mod 4).
-   * `3`: Backward — switch to previous phase (+3 mod 4).
-   
-4. **Reward Function**: 
-   The reward is the **negative sum of halting vehicles** across all lanes per simulation step. The agent learns to minimize congestion across all directions and turn types.
+4. **Reward Function (Discounted Cumulative)**: 
+   The reward is designed to minimize overall congestion using **Cumulative Waiting Time**. Key features:
+   * **Wait Time Metric**: Instead of just counting cars, we penalize the total seconds vehicles have been stationary. This provides a continuous gradient for learning.
+   * **Left-Turn Priority**: Halting vehicles in left-turn lanes incur a **1.5x penalty** multiplier to prevent starvation on turning lanes.
+   * **Within-Step Discounting ($\gamma=0.99$)**: The reward for a single control action is the discounted sum of rewards across its 10-second duration: $R = \sum_{t=0}^{9} 0.99^t \cdot r_{sim, t}$.
+   * **Long-term Optimization**: The agent uses a discount factor of **0.99** to prioritize long-term traffic flow over immediate clearing of a single lane.
 
 ## 🚦 Traffic Scenarios
 
-The environment supports 5 traffic scenarios that can be mixed during training and tested individually during evaluation:
+The environment supports 6 traffic scenarios:
 
 | Scenario | Key | Description | Volume per direction per 100s |
 |----------|-----|-------------|-------------------------------|
 | Normal | `normal` | Gaussian bell-curve, moderate traffic | 10 → 35 → 60 → 35 → 10 |
-| Crowded All | `crowded_all` | High constant traffic from all 4 directions | 60 straight / 25 right / 15 left |
+| Crowded All | `crowded_all` | High constant traffic from all directions | 60 straight / 25 right / 15 left |
 | Crowded N-S | `crowded_ns` | Heavy N-S traffic, light E-W traffic | Heavy: 60/25/15, Light: 10/4/2 |
 | Crowded E-W | `crowded_ew` | Heavy E-W traffic, light N-S traffic | Heavy: 60/25/15, Light: 10/4/2 |
-| Fluctuating | `fluctuate` | Alternates dominant axis every 100s | Switches between heavy and light |
+| Fluctuating | `fluctuate` | Alternating dominant axis every 100s | Switches between heavy and light |
+| Bernoulli | `bernoulli` | Independent Bernoulli spawn per lane | Configurable probability $p$ |
 
 Each direction spawns three types of vehicles: straight, right turn, and left turn, with a ~60/25/15% split.
+
+### Bernoulli Distribution Details
+The `bernoulli` scenario differs from the others by using a purely stochastic spawn model:
+*   **Independent Lanes**: For every simulation second, 12 independent Bernoulli trials are performed (one for each entry lane).
+*   **Spawn Probability ($p$)**: There is a configurable probability $p$ (default 0.05) that a vehicle will spawn on any given lane in any given second.
+*   **Realistic Routing**: Vehicles spawned in lanes 0/1 are randomly assigned Straight or Right routes, while vehicles in lane 2 are assigned Left-turn routes, matching real junction logic.
+*   **Usage**: Ideal for testing the agent's ability to handle random, unpredictable traffic surges compared to the rhythmic patterns of the Gaussian scenarios.
 
 During **training**, scenarios are randomly sampled each episode so the agent generalizes across all traffic patterns. During **evaluation**, each scenario is tested separately for a clear per-scenario comparison.
 
@@ -103,7 +112,17 @@ python train.py --scenarios normal crowded_all
 
 **Training with custom episodes:**
 ```bash
-python train.py --episodes 300
+python train.py --episodes 100
+```
+
+**Training with Bernoulli probability (p=0.08):**
+```bash
+python train.py --scenarios bernoulli --prob 0.08
+```
+
+**Switching Reward Metric (e.g., to vehicle count):**
+```bash
+python train.py --reward-mode count
 ```
 
 **Visualized training using SUMO-GUI:**
@@ -137,9 +156,9 @@ python evaluate.py --scenarios normal crowded_all fluctuate
 python evaluate.py --no-gui
 ```
 
-**Custom checkpoint and runs:**
+**Custom checkpoint and evaluation probability:**
 ```bash
-python evaluate.py --model checkpoints/dqn_ep150.pt --runs 5
+python evaluate.py --model checkpoints/dqn_best.pt --runs 1 --prob 0.05
 ```
 
 At the end, `evaluation_results.png` is generated with a side-by-side bar chart comparing RL vs. static controller performance on each scenario.
