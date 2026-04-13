@@ -331,37 +331,26 @@ class TrafficEnv:
         return self._get_state()
 
     def step(self, action: int):
-        reward = 0.0
-        wait_sum = 0.0
-        count_sum = 0.0
-        scoring = self._step < self.MAX_STEPS  # only accumulate reward up to MAX_STEPS
+        scoring = self._step < self.MAX_STEPS
 
         if action != 0 and self._phase_time >= self.MIN_GREEN:
             yellow = self.GREEN_PHASES[self._green_idx] + 1
             self._set_phase(yellow)
-            self._is_yellow = True
-            for t in range(self.YELLOW_DURATION):
+            for _ in range(self.YELLOW_DURATION):
                 traci.simulationStep()
-                if scoring:
-                    r, w, c = self._get_reward(return_components=True)
-                    gamma_t = (self.GAMMA ** t)
-                    reward += gamma_t * r
-                    wait_sum += gamma_t * w
-                    count_sum += gamma_t * c
 
             self._green_idx = (self._green_idx + action) % self.NUM_PHASES
             self._set_phase(self.GREEN_PHASES[self._green_idx])
-            self._is_yellow = False
             self._phase_time = 0.0
 
-        for t in range(self.STEP_SIZE):
+        for _ in range(self.STEP_SIZE):
             traci.simulationStep()
-            if scoring:
-                r, w, c = self._get_reward(return_components=True)
-                gamma_t = (self.GAMMA ** t)
-                reward += gamma_t * r
-                wait_sum += gamma_t * w
-                count_sum += gamma_t * c
+
+        # Calculate reward ONCE for the entire 10s step
+        if scoring:
+            reward, wait_sum, count_sum = self._get_reward(return_components=True)
+        else:
+            reward, wait_sum, count_sum = 0.0, 0.0, 0.0
 
         self._phase_time += self.STEP_SIZE
         self._step += 1
