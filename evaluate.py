@@ -197,18 +197,36 @@ if __name__ == "__main__":
         print("  Run  python train.py  first to train a model.")
         raise SystemExit(1)
 
-    rl_rewards = run_rl(args.model, sumo_cfg, args.gui, args.runs,
-                        bernoulli_p=args.prob, reward_mode=args.reward_mode,
-                        scenario=args.scenario)
-    static_rewards = run_static(sumo_cfg, args.gui, args.runs,
-                                bernoulli_p=args.prob, reward_mode=args.reward_mode,
-                                scenario=args.scenario)
+    all_rl_rewards = []
+    all_static_rewards = []
 
-    improvement = ((np.mean(rl_rewards) - np.mean(static_rewards))
-                   / abs(np.mean(static_rewards)) * 100
-                   if np.mean(static_rewards) != 0 else 0)
-    print(f"\n  RL: {np.mean(rl_rewards):.1f} +/- {np.std(rl_rewards):.1f}  |  "
-          f"Static: {np.mean(static_rewards):.1f} +/- {np.std(static_rewards):.1f}  |  "
-          f"{improvement:+.1f}%")
+    print(f"\n{'='*60}")
+    print(f"  Evaluating performance across all 4 scenarios")
+    print(f"  Scenarios : {TrafficEnv.SCENARIOS}")
+    print(f"  Runs/scen : {args.runs}")
+    print(f"{'='*60}")
 
-    plot_comparison(rl_rewards, static_rewards)
+    for scen in TrafficEnv.SCENARIOS:
+        scen_rl = run_rl(args.model, sumo_cfg, args.gui, args.runs,
+                         bernoulli_p=args.prob, reward_mode=args.reward_mode,
+                         scenario=scen)
+        scen_static = run_static(sumo_cfg, args.gui, args.runs,
+                                 bernoulli_p=args.prob, reward_mode=args.reward_mode,
+                                 scenario=scen)
+        
+        all_rl_rewards.extend(scen_rl)
+        all_static_rewards.extend(scen_static)
+
+    rl_avg = np.mean(all_rl_rewards)
+    static_avg = np.mean(all_static_rewards)
+    improvement = ((rl_avg - static_avg) / abs(static_avg) * 100
+                   if static_avg != 0 else 0)
+
+    print(f"\n{'='*60}")
+    print(f"  GRAND AVERAGE RESULTS")
+    print(f"  RL Agent    : {rl_avg:>8.1f} +/- {np.std(all_rl_rewards):.1f}")
+    print(f"  Static Ctrl : {static_avg:>8.1f} +/- {np.std(all_static_rewards):.1f}")
+    print(f"  Improvement : {improvement:>+8.1f}%")
+    print(f"{'='*60}\n")
+
+    plot_comparison(all_rl_rewards, all_static_rewards)

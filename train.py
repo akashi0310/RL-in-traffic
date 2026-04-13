@@ -20,6 +20,7 @@ Usage
 
 import os
 import argparse
+from datetime import datetime
 
 import numpy as np
 import matplotlib
@@ -39,7 +40,7 @@ def moving_average(values, window=10):
     return np.convolve(values, np.ones(window) / window, mode="valid")
 
 
-def plot_training(rewards, losses, save_path="training_results.png"):
+def plot_training(rewards, losses, wait_parts=None, count_parts=None, save_path="training_results.png"):
     """
     Parameters
     ----------
@@ -47,8 +48,13 @@ def plot_training(rewards, losses, save_path="training_results.png"):
         Per-episode total reward.
     losses : list[float]
         Per-episode average loss.
+    wait_parts : list[float], optional
+        Lead-vehicle waiting component of reward.
+    count_parts : list[float], optional
+        Halting vehicle count component of reward.
     """
-    fig, axes = plt.subplots(2, 1, figsize=(12, 9), facecolor="#1e1e2e")
+    n_rows = 3 if wait_parts is not None else 2
+    fig, axes = plt.subplots(n_rows, 1, figsize=(12, 4.5 * n_rows), facecolor="#1e1e2e")
     for ax in axes:
         ax.set_facecolor("#2a2a3e")
         ax.tick_params(colors="#cdd6f4")
@@ -83,6 +89,21 @@ def plot_training(rewards, losses, save_path="training_results.png"):
     axes[1].legend(facecolor="#313244", labelcolor="#cdd6f4")
     axes[1].grid(True, color="#313244", alpha=0.6)
 
+    # Component panel (if provided)
+    if wait_parts is not None and count_parts is not None:
+        episodes = np.arange(1, len(rewards) + 1)
+        # Use stacked or side-by-side? Let's use two lines for clarity
+        axes[2].plot(episodes, wait_parts, color="#fab387", alpha=0.7, label="Wait Component")
+        axes[2].plot(episodes, count_parts, color="#89b4fa", alpha=0.7, label="Count Component")
+        if len(wait_parts) >= 5:
+            axes[2].plot(episodes[4:], moving_average(wait_parts, 5), color="#fab387", linewidth=2)
+            axes[2].plot(episodes[4:], moving_average(count_parts, 5), color="#89b4fa", linewidth=2)
+        axes[2].set_xlabel("Episode")
+        axes[2].set_ylabel("Component Reward (Unscaled)")
+        axes[2].set_title("Reward Breakdown (Harmonic Components)")
+        axes[2].legend(facecolor="#313244", labelcolor="#cdd6f4")
+        axes[2].grid(True, color="#313244", alpha=0.6)
+
     plt.tight_layout()
     plt.savefig(save_path, dpi=150, bbox_inches="tight")
     print(f"\n  [plot saved] {save_path}")
@@ -109,7 +130,13 @@ def train(num_episodes: int = 200, use_gui: bool = False, resume: str = None,
 
     losses_log = []
     rewards_log = []
+    wait_log = []
+    count_log = []
     best_reward = -float("inf")
+
+    # Unique identifier for this session's plot
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    session_plot_path = f"results_{timestamp}.png"
 
     print(f"\n{'='*60}")
     print(f"  DQN Traffic Signal Control - Training")
@@ -123,17 +150,21 @@ def train(num_episodes: int = 200, use_gui: bool = False, resume: str = None,
         env.set_scenario(scenario_cycle[(ep - 1) % len(scenario_cycle)])
         state = env.reset()
         total_reward = 0.0
+        ep_wait = 0.0
+        ep_count = 0.0
         ep_losses = []
 
         while True:
             action = agent.select_action(state)
-            next_state, reward, done, _ = env.step(action)
+            next_state, reward, done, info = env.step(action)
             reward *= REWARD_SCALE
             agent.store(state, action, reward, next_state, done)
             loss = agent.update()
             if loss is not None:
                 ep_losses.append(loss)
             total_reward += reward
+            ep_wait += info.get("wait_part", 0.0)
+            ep_count += info.get("count_part", 0.0)
             state = next_state
             if done:
                 break
@@ -141,6 +172,8 @@ def train(num_episodes: int = 200, use_gui: bool = False, resume: str = None,
         avg_loss = float(np.mean(ep_losses)) if ep_losses else 0.0
         rewards_log.append(total_reward)
         losses_log.append(avg_loss)
+        wait_log.append(ep_wait)
+        count_log.append(ep_count)
 
         # Console log
         bar = "=" * int(30 * ep / num_episodes) + "-" * (30 - int(30 * ep / num_episodes))
@@ -156,13 +189,16 @@ def train(num_episodes: int = 200, use_gui: bool = False, resume: str = None,
         if ep % 50 == 0:
             agent.save(os.path.join(ckpt_dir, f"dqn_ep{ep}.pt"))
 
-        # Save best model
-        if total_reward > best_reward:
-            best_reward = total_reward
-            agent.save(os.path.join(ckpt_dir, "dqn_best.pt"))
+        # Save best model based on the average of the last 4 scenarios (one full cycle)
+        if ep >= 4 and ep % len(scenario_cycle) == 0:
+            cycle_avg = np.mean(rewards_log[-len(scenario_cycle):])
+            if cycle_avg > best_reward:
+                best_reward = cycle_avg
+                agent.save(os.path.join(ckpt_dir, "dqn_best.pt"))
+                print(f"  [new best] cycle avg = {best_reward:.1f}")
 
     agent.save(os.path.join(ckpt_dir, "dqn_final.pt"))
-    plot_training(rewards_log, losses_log)
+    plot_training(rewards_log, losses_log, wait_log, count_log, save_path=session_plot_path)
 
     print(f"\n  Training complete. Best reward: {best_reward:.1f}")
     return agent, rewards_log

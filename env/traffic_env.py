@@ -48,10 +48,11 @@ except ImportError as e:
 
 
 BERNOULLI_ROUTE_FILE = "bernoulli.rou.xml"
-RED_TIME_HARD_LIMIT = 100
-RED_TIME_SOFT_LIMIT = 80
+COUNT_REWARD_UPPER_BOUND = 10
+WAIT_REWARD_UPPER_BOUND = 15
+WAIT_TIME_LIMIT = 100
 
-def compute_reward(lanes: list, left_lanes: list, mode: str = "wait") -> float:
+def compute_reward(lanes: list, left_lanes: list, mode: str = "wait", return_components: bool = False) -> float:
     """
     Standardized reward function shared between Environment and Evaluation.
 
@@ -66,26 +67,41 @@ def compute_reward(lanes: list, left_lanes: list, mode: str = "wait") -> float:
                       on each lane.
         - 'count'   : Negative number of halting vehicles on the lane.
         - 'harmonic': Lead-vehicle waiting time + halting count combined.
+    return_components : bool
+        If True, returns (total_reward, wait_part, count_part).
     """
     reward = 0.0
+    wait_part_total = 0.0
+    count_part_total = 0.0
+
     for l in lanes:
+        wait_val = 0.0
+        count_val = 0.0
+
         if mode == "harmonic" or mode == "wait":
             veh_ids = traci.lane.getLastStepVehicleIDs(l)
             lead_wait = 0.0
             if veh_ids:
                 lead = max(veh_ids, key=lambda v: traci.vehicle.getLanePosition(v))
                 lead_wait = traci.vehicle.getWaitingTime(lead)
-            if mode == "harmonic":
-                val = lead_wait*np.exp((lead_wait - RED_TIME_HARD_LIMIT) / (RED_TIME_HARD_LIMIT - RED_TIME_SOFT_LIMIT)) + 2*traci.lane.getLastStepHaltingNumber(l)
-            else:
-                val = lead_wait
-        else:  # "count"
-            val = traci.lane.getLastStepHaltingNumber(l)
 
-        if l in left_lanes:
-            reward -= val * 1.5
-        else:
-            reward -= val
+            if mode == "harmonic":
+                wait_val = WAIT_REWARD_UPPER_BOUND / (1 + np.exp(-4 * (lead_wait - WAIT_TIME_LIMIT)))
+                count_val = COUNT_REWARD_UPPER_BOUND * (1 - np.exp(-0.1 * traci.lane.getLastStepHaltingNumber(l)))
+
+            else:
+                wait_val = lead_wait
+        else:  # "count"
+            count_val = traci.lane.getLastStepHaltingNumber(l)
+
+        penalty = 1.5 if l in left_lanes else 1.0
+        
+        reward -= (wait_val + count_val) * penalty
+        wait_part_total -= wait_val * penalty
+        count_part_total -= count_val * penalty
+
+    if return_components:
+        return reward, wait_part_total, count_part_total
     return reward
 
 
@@ -297,8 +313,8 @@ class TrafficEnv:
             dtype=np.float32,
         )
 
-    def _get_reward(self) -> float:
-        return compute_reward(self.ALL_LANES, self.LEFT_LANES, mode=self.reward_mode)
+    def _get_reward(self, return_components: bool = False):
+        return compute_reward(self.ALL_LANES, self.LEFT_LANES, mode=self.reward_mode, return_components=return_components)
 
     # -- Gym-style API ---------------------------------------------------------
     def reset(self) -> np.ndarray:
@@ -316,6 +332,8 @@ class TrafficEnv:
 
     def step(self, action: int):
         reward = 0.0
+        wait_sum = 0.0
+        count_sum = 0.0
         scoring = self._step < self.MAX_STEPS  # only accumulate reward up to MAX_STEPS
 
         if action != 0 and self._phase_time >= self.MIN_GREEN:
@@ -325,7 +343,11 @@ class TrafficEnv:
             for t in range(self.YELLOW_DURATION):
                 traci.simulationStep()
                 if scoring:
-                    reward += (self.GAMMA ** t) * self._get_reward()
+                    r, w, c = self._get_reward(return_components=True)
+                    gamma_t = (self.GAMMA ** t)
+                    reward += gamma_t * r
+                    wait_sum += gamma_t * w
+                    count_sum += gamma_t * c
 
             self._green_idx = (self._green_idx + action) % self.NUM_PHASES
             self._set_phase(self.GREEN_PHASES[self._green_idx])
@@ -335,7 +357,11 @@ class TrafficEnv:
         for t in range(self.STEP_SIZE):
             traci.simulationStep()
             if scoring:
-                reward += (self.GAMMA ** t) * self._get_reward()
+                r, w, c = self._get_reward(return_components=True)
+                gamma_t = (self.GAMMA ** t)
+                reward += gamma_t * r
+                wait_sum += gamma_t * w
+                count_sum += gamma_t * c
 
         self._phase_time += self.STEP_SIZE
         self._step += 1
@@ -356,6 +382,8 @@ class TrafficEnv:
             "step": self._step,
             "phase": self._green_idx,
             "phase_time": self._phase_time,
+            "wait_part": wait_sum,
+            "count_part": count_sum,
         }
 
     def close(self):
