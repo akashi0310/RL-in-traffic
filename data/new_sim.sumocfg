@@ -2,7 +2,7 @@
 <sumoConfiguration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">
     <input>
         <net-file value="new_intersection.net.xml"/>
-        <route-files value="normal_traffic.rou.xml"/>
+        <route-files value="bernoulli.rou.xml"/>
     </input>
     <time>
         <begin value="0"/>

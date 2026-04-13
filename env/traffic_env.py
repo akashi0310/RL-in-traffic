@@ -21,19 +21,17 @@ Actions (square layout: 0-1-2-3 as corners):
   2 -> diagonal (opposite phase, +2 mod 4)
   3 -> backward (previous phase, +3 mod 4)
 
-Reward: - sum halting vehicles across all lanes (per sim-step sum)
+Reward: - sum halting vehicles / waiting time across all lanes (per sim-step sum)
 
-Scenarios (route files):
-  normal_traffic      - Gaussian bell-curve, moderate volume
-  crowded_all         - High constant volume from all directions
-  crowded_single      - High volume N-S only (+ EW variant)
-  crowded_fluctuate   - Alternating N-S / E-W heavy every 100s
+Traffic model:
+  Bernoulli spawn per lane — each lane independently spawns a vehicle every
+  simulation second with probability `bernoulli_p`. The route file is
+  regenerated at every reset() based on the current probability.
 """
 
 import os
 import sys
 import time
-import random
 import subprocess
 import numpy as np
 
@@ -49,29 +47,38 @@ except ImportError as e:
     ) from e
 
 
-# -- Available scenario route files -------------------------------------------
-SCENARIOS = {
-    "normal":     "normal_traffic.rou.xml",
-    "crowded_all": "crowded_all.rou.xml",
-    "crowded_ns":  "crowded_single.rou.xml",
-    "crowded_ew":  "crowded_single_ew.rou.xml",
-    "fluctuate":   "crowded_fluctuate.rou.xml",
-    "bernoulli":   "bernoulli.rou.xml",
-}
-
+BERNOULLI_ROUTE_FILE = "bernoulli.rou.xml"
+RED_TIME_HARD_LIMIT = 100
+RED_TIME_SOFT_LIMIT = 80
 
 def compute_reward(lanes: list, left_lanes: list, mode: str = "wait") -> float:
     """
     Standardized reward function shared between Environment and Evaluation.
-    
-    Modes:
-    - 'wait': Negative cumulative waiting time (seconds)
-    - 'count': Negative number of halting vehicles
+
+    Parameters
+    ----------
+    lanes : list[str]
+        All entry lanes to include in the reward.
+    left_lanes : list[str]
+        Subset of lanes that get the 1.5x left-turn starvation penalty.
+    mode : str
+        - 'wait'    : Negative waiting time of the lead vehicle (queue head)
+                      on each lane.
+        - 'count'   : Negative number of halting vehicles on the lane.
+        - 'harmonic': Lead-vehicle waiting time + halting count combined.
     """
     reward = 0.0
     for l in lanes:
-        if mode == "wait":
-            val = traci.lane.getWaitingTime(l)
+        if mode == "harmonic" or mode == "wait":
+            veh_ids = traci.lane.getLastStepVehicleIDs(l)
+            lead_wait = 0.0
+            if veh_ids:
+                lead = max(veh_ids, key=lambda v: traci.vehicle.getLanePosition(v))
+                lead_wait = traci.vehicle.getWaitingTime(lead)
+            if mode == "harmonic":
+                val = lead_wait*np.exp((lead_wait - RED_TIME_HARD_LIMIT) / (RED_TIME_HARD_LIMIT - RED_TIME_SOFT_LIMIT)) + 2*traci.lane.getLastStepHaltingNumber(l)
+            else:
+                val = lead_wait
         else:  # "count"
             val = traci.lane.getLastStepHaltingNumber(l)
 
@@ -99,9 +106,12 @@ class TrafficEnv:
     MAX_STEPS = 50                 # 50 x 10 s = 500 s per episode
     GAMMA = 0.99                   # Discount factor for sim-steps
 
+    SCENARIOS = ("uniform", "horizontal", "vertical", "alternate")
+
     def __init__(self, sumo_cfg: str, use_gui: bool = False, port: int = 8813,
-                 scenarios: list = None, bernoulli_p: float = 0.05,
-                 reward_mode: str = "wait"):
+                 bernoulli_p: float = 0.05, reward_mode: str = "wait",
+                 eval_mode: bool = False, drain_step_cap: int = 200,
+                 scenario: str = "uniform"):
         """
         Parameters
         ----------
@@ -111,13 +121,8 @@ class TrafficEnv:
             Launch sumo-gui instead of headless sumo.
         port : int
             TraCI port.
-        scenarios : list of str or None
-            Scenario names to sample from on each reset().
-            Valid names: "normal", "crowded_all", "crowded_ns", "crowded_ew",
-                         "fluctuate", "bernoulli", or "all" (uses every scenario).
-            If None or empty, uses the route file from the .sumocfg as-is.
         bernoulli_p : float
-            Spawning probability per lane per second for 'bernoulli' scenario.
+            Spawning probability per lane per second (Bernoulli trial).
         reward_mode : str
             'wait' (waiting time) or 'count' (halting vehicles).
         """
@@ -127,25 +132,15 @@ class TrafficEnv:
         self.port = port
         self.bernoulli_p = bernoulli_p
         self.reward_mode = reward_mode
+        self.eval_mode = eval_mode
+        self.drain_step_cap = drain_step_cap
+        if scenario not in self.SCENARIOS:
+            raise ValueError(f"scenario must be one of {self.SCENARIOS}, got {scenario!r}")
+        self.scenario = scenario
         self._connected = False
         self._step = 0
         self._phase_time = 0.0
         self._green_idx = 0
-
-        # Build list of route files to sample from
-        self._route_files = []
-        if scenarios:
-            for s in scenarios:
-                if s == "all":
-                    self._route_files = list(SCENARIOS.values())
-                    break
-                if s not in SCENARIOS:
-                    raise ValueError(
-                        f"Unknown scenario '{s}'. "
-                        f"Choose from: {list(SCENARIOS.keys())} or 'all'")
-                self._route_files.append(SCENARIOS[s])
-
-        self._current_scenario = None
 
     # -- Size properties -------------------------------------------------------
     @property
@@ -159,25 +154,16 @@ class TrafficEnv:
     # -- Internal SUMO control -------------------------------------------------
     def _launch(self):
         binary = "sumo-gui" if self.use_gui else "sumo"
+        self._generate_bernoulli_routes()
         cmd = [
             binary, "-c", self.sumo_cfg,
+            "--route-files", BERNOULLI_ROUTE_FILE,
             "--remote-port", str(self.port),
             "--waiting-time-memory", "3600",
             "--no-step-log", "true",
             "--no-warnings", "true",
             "--duration-log.disable", "true",
         ]
-        # Override route file if using scenario mixing
-        if self._route_files:
-            route = random.choice(self._route_files)
-            self._current_scenario = route
-            
-            # Dynamically generate Bernoulli routes if selected
-            if route == "bernoulli.rou.xml":
-                self._generate_bernoulli_routes()
-                
-            cmd += ["--route-files", route]
-
         if self.use_gui:
             cmd += ["--start", "--delay", "50"]
         self._proc = subprocess.Popen(
@@ -215,11 +201,40 @@ class TrafficEnv:
         traci.trafficlight.setPhase(self.TL_ID, phase_idx)
         traci.trafficlight.setPhaseDuration(self.TL_ID, 999_999)
 
+    def _scenario_segments(self):
+        """
+        Return list of (begin, end, p_horiz, p_vert) tuples that define the
+        per-direction Bernoulli probability over time for the current scenario.
+        Horizontal = E2C/W2C; Vertical = N2C/S2C.
+        """
+        end_time = self.MAX_STEPS * self.STEP_SIZE
+        hi = self.bernoulli_p
+        lo = self.bernoulli_p / 2.0
+
+        if self.scenario == "uniform":
+            return [(0, end_time, hi, hi)]
+        if self.scenario == "horizontal":
+            return [(0, end_time, hi, lo)]
+        if self.scenario == "vertical":
+            return [(0, end_time, lo, hi)]
+        if self.scenario == "alternate":
+            n_seg = 4
+            seg_len = end_time // n_seg
+            segs = []
+            for i in range(n_seg):
+                begin = i * seg_len
+                end = end_time if i == n_seg - 1 else (i + 1) * seg_len
+                if i % 2 == 0:
+                    segs.append((begin, end, hi, lo))
+                else:
+                    segs.append((begin, end, lo, hi))
+            return segs
+        raise ValueError(self.scenario)
+
     def _generate_bernoulli_routes(self):
         """Generate a Bernoulli distribution route file where each lane independently spawns vehicles."""
-        filepath = os.path.join(self.sumo_dir, "bernoulli.rou.xml")
-        end_time = self.MAX_STEPS * self.STEP_SIZE
-        
+        filepath = os.path.join(self.sumo_dir, BERNOULLI_ROUTE_FILE)
+
         # Directions: from -> [straight, right, left]
         directions = {
             "W2C": ["C2E", "C2S", "C2N"],
@@ -227,7 +242,9 @@ class TrafficEnv:
             "N2C": ["C2S", "C2W", "C2E"],
             "S2C": ["C2N", "C2E", "C2W"]
         }
-        
+        horizontal = {"W2C", "E2C"}
+        segments = self._scenario_segments()
+
         with open(filepath, "w") as f:
             f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
             f.write('<routes>\n')
@@ -235,31 +252,34 @@ class TrafficEnv:
             f.write('    <vType id="truck" vClass="truck" accel="1.2" decel="2.5" sigma="0.5" length="10.0" maxSpeed="11.11" carFollowModel="Krauss"/>\n')
             f.write('    <vType id="bus" vClass="bus" accel="1.2" decel="2.5" sigma="0.5" length="12.0" maxSpeed="11.11" carFollowModel="Krauss"/>\n')
             f.write('    <vTypeDistribution id="mixed_traffic" vTypes="car truck bus" probabilities="0.6 0.2 0.2"/>\n\n')
-            
+
             for src_edge, dests in directions.items():
-                # Define routes
                 f.write(f'    <route id="{src_edge}_s" edges="{src_edge} {dests[0]}"/>\n')
                 f.write(f'    <route id="{src_edge}_r" edges="{src_edge} {dests[1]}"/>\n')
                 f.write(f'    <route id="{src_edge}_l" edges="{src_edge} {dests[2]}"/>\n')
-                
-                # Distributions
-                # 0 & 1: Straight and Right (approx 70/30 of the 85% total flow)
                 f.write(f'    <routeDistribution id="{src_edge}_sr" routes="{src_edge}_s {src_edge}_r" probabilities="0.7 0.3"/>\n')
-                
-                # Flow for Lane 0 (Straight/Right)
-                f.write(f'    <flow id="flow_{src_edge}_0" route="{src_edge}_sr" type="mixed_traffic" '
-                        f'begin="0" end="{end_time}" probability="{self.bernoulli_p}" '
-                        f'departLane="0" departSpeed="max"/>\n')
-                # Flow for Lane 1 (Straight/Right)
-                f.write(f'    <flow id="flow_{src_edge}_1" route="{src_edge}_sr" type="mixed_traffic" '
-                        f'begin="0" end="{end_time}" probability="{self.bernoulli_p}" '
-                        f'departLane="1" departSpeed="max"/>\n')
-                # Flow for Lane 2 (Left Turn only)
-                f.write(f'    <flow id="flow_{src_edge}_2" route="{src_edge}_l" type="mixed_traffic" '
-                        f'begin="0" end="{end_time}" probability="{self.bernoulli_p}" '
-                        f'departLane="2" departSpeed="max"/>\n')
-            
+
+                for si, (begin, end, p_h, p_v) in enumerate(segments):
+                    p = p_h if src_edge in horizontal else p_v
+                    # Lane 0 (straight/right)
+                    f.write(f'    <flow id="flow_{src_edge}_0_s{si}" route="{src_edge}_sr" type="mixed_traffic" '
+                            f'begin="{begin}" end="{end}" probability="{p}" '
+                            f'departLane="0" departSpeed="max"/>\n')
+                    # Lane 1 (straight/right)
+                    f.write(f'    <flow id="flow_{src_edge}_1_s{si}" route="{src_edge}_sr" type="mixed_traffic" '
+                            f'begin="{begin}" end="{end}" probability="{p}" '
+                            f'departLane="1" departSpeed="max"/>\n')
+                    # Lane 2 (left)
+                    f.write(f'    <flow id="flow_{src_edge}_2_s{si}" route="{src_edge}_l" type="mixed_traffic" '
+                            f'begin="{begin}" end="{end}" probability="{p}" '
+                            f'departLane="2" departSpeed="max"/>\n')
+
             f.write('</routes>\n')
+
+    def set_scenario(self, scenario: str):
+        if scenario not in self.SCENARIOS:
+            raise ValueError(f"scenario must be one of {self.SCENARIOS}, got {scenario!r}")
+        self.scenario = scenario
 
     # -- State & reward --------------------------------------------------------
     def _get_state(self) -> np.ndarray:
@@ -287,6 +307,7 @@ class TrafficEnv:
         self._step = 0
         self._phase_time = 0.0
         self._green_idx = 0
+        self._is_yellow = False
         self._launch()
         self._set_phase(self.GREEN_PHASES[self._green_idx])
         for _ in range(5):           # warm-up: let a few vehicles spawn
@@ -295,31 +316,37 @@ class TrafficEnv:
 
     def step(self, action: int):
         reward = 0.0
+        scoring = self._step < self.MAX_STEPS  # only accumulate reward up to MAX_STEPS
 
         if action != 0 and self._phase_time >= self.MIN_GREEN:
             yellow = self.GREEN_PHASES[self._green_idx] + 1
             self._set_phase(yellow)
+            self._is_yellow = True
             for t in range(self.YELLOW_DURATION):
                 traci.simulationStep()
-                # Apply step-level discounting: total_reward = sum(gamma^t * r_t)
-                reward += (self.GAMMA ** t) * self._get_reward()
+                if scoring:
+                    reward += (self.GAMMA ** t) * self._get_reward()
 
             self._green_idx = (self._green_idx + action) % self.NUM_PHASES
             self._set_phase(self.GREEN_PHASES[self._green_idx])
+            self._is_yellow = False
             self._phase_time = 0.0
 
         for t in range(self.STEP_SIZE):
             traci.simulationStep()
-            # If a yellow light occurred, we continue the discount power index appropriately.
-            # However, for simplicity and alignment with standard MDP discretization, 
-            # we reset the discount index for the new main action duration or 
-            # continue it if we consider the whole step() as one interval.
-            # Using t as the index for the duration of this action phase:
-            reward += (self.GAMMA ** t) * self._get_reward()
+            if scoring:
+                reward += (self.GAMMA ** t) * self._get_reward()
 
         self._phase_time += self.STEP_SIZE
         self._step += 1
-        done = self._step >= self.MAX_STEPS
+
+        if self.eval_mode:
+            past_spawn = self._step >= self.MAX_STEPS
+            cleared = past_spawn and traci.simulation.getMinExpectedNumber() == 0
+            hit_cap = self._step >= self.MAX_STEPS + self.drain_step_cap
+            done = cleared or hit_cap
+        else:
+            done = self._step >= self.MAX_STEPS
 
         if done:
             self._close()
@@ -329,7 +356,6 @@ class TrafficEnv:
             "step": self._step,
             "phase": self._green_idx,
             "phase_time": self._phase_time,
-            "scenario": self._current_scenario,
         }
 
     def close(self):
