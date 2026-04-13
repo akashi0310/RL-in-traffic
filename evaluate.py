@@ -109,8 +109,12 @@ def run_static(sumo_cfg: str, use_gui: bool, num_runs: int,
         traci.init(port)
 
         total_reward = 0.0
-        for _ in range(max_sim_secs):
-            traci.simulationStep()
+        # Main simulation period (50 steps of 10 seconds each)
+        for _ in range(TrafficEnv.MAX_STEPS):
+            for _ in range(TrafficEnv.STEP_SIZE):
+                traci.simulationStep()
+            
+            # Calculate reward once at the end of the 10s block
             step_reward = compute_reward(lanes, TrafficEnv.LEFT_LANES, mode=reward_mode)
             total_reward += step_reward * REWARD_SCALE
 
