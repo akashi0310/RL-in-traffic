@@ -23,13 +23,13 @@ import torch.optim as optim
 class QNetwork(nn.Module):
     """Two-hidden-layer MLP: state → Q(state, action) for each action."""
 
-    def __init__(self, state_size: int, action_size: int, hidden: int = 128):
+    def __init__(self, state_size: int, action_size: int, hidden: int = 400):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(state_size, hidden),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(hidden, hidden),
-            nn.ReLU(),
+            nn.Tanh(),
             nn.Linear(hidden, action_size),
         )
 

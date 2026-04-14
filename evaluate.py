@@ -191,7 +191,7 @@ if __name__ == "__main__":
     parser.add_argument("--scenario", type=str, default="uniform",
                         choices=list(TrafficEnv.SCENARIOS),
                         help="Traffic scenario (default: uniform)")
-    parser.set_defaults(gui=True)
+    parser.set_defaults(gui=False)
     args = parser.parse_args()
 
     sumo_cfg = os.path.join("data", "new_sim.sumocfg")
@@ -205,21 +205,19 @@ if __name__ == "__main__":
     all_static_rewards = []
 
     print(f"\n{'='*60}")
-    print(f"  Evaluating performance across all 4 scenarios")
-    print(f"  Scenarios : {TrafficEnv.SCENARIOS}")
-    print(f"  Runs/scen : {args.runs}")
+    print(f"  Evaluating performance on scenario: {args.scenario}")
+    print(f"  Runs      : {args.runs}")
     print(f"{'='*60}")
 
-    for scen in TrafficEnv.SCENARIOS:
-        scen_rl = run_rl(args.model, sumo_cfg, args.gui, args.runs,
-                         bernoulli_p=args.prob, reward_mode=args.reward_mode,
-                         scenario=scen)
-        scen_static = run_static(sumo_cfg, args.gui, args.runs,
-                                 bernoulli_p=args.prob, reward_mode=args.reward_mode,
-                                 scenario=scen)
-        
-        all_rl_rewards.extend(scen_rl)
-        all_static_rewards.extend(scen_static)
+    scen_rl = run_rl(args.model, sumo_cfg, args.gui, args.runs,
+                     bernoulli_p=args.prob, reward_mode=args.reward_mode,
+                     scenario=args.scenario)
+    scen_static = run_static(sumo_cfg, args.gui, args.runs,
+                             bernoulli_p=args.prob, reward_mode=args.reward_mode,
+                             scenario=args.scenario)
+
+    all_rl_rewards.extend(scen_rl)
+    all_static_rewards.extend(scen_static)
 
     rl_avg = np.mean(all_rl_rewards)
     static_avg = np.mean(all_static_rewards)

@@ -11,7 +11,7 @@ SUMO Traffic Signal Control Environment (TraCI-based).
 
 State (10-dim float32):
   [queue_g0, queue_g1, queue_g2, queue_g3,         <- summed halting vehicles per group / 25
-   speed_g0, speed_g1, speed_g2, speed_g3,         <- mean speed per group / max speed
+   wait_g0,  wait_g1,  wait_g2,  wait_g3,          <- max lead-vehicle waiting time per group / WAIT_TIME_LIMIT
    current_green_phase,                            <- 0..3
    phase_time_norm]                                <- seconds / 60
 
@@ -50,7 +50,7 @@ except ImportError as e:
 BERNOULLI_ROUTE_FILE = "bernoulli.rou.xml"
 COUNT_REWARD_UPPER_BOUND = 10
 WAIT_REWARD_UPPER_BOUND = 15
-WAIT_TIME_LIMIT = 100
+WAIT_TIME_LIMIT = 60
 
 def compute_reward(lanes: list, left_lanes: list, mode: str = "wait", return_components: bool = False) -> float:
     """
@@ -86,7 +86,7 @@ def compute_reward(lanes: list, left_lanes: list, mode: str = "wait", return_com
                 lead_wait = traci.vehicle.getWaitingTime(lead)
 
             if mode == "harmonic":
-                wait_val = WAIT_REWARD_UPPER_BOUND / (1 + np.exp(-4 * (lead_wait - WAIT_TIME_LIMIT)))
+                wait_val = WAIT_REWARD_UPPER_BOUND / (1 + np.exp(-0.05 * (lead_wait - WAIT_TIME_LIMIT)))
                 count_val = COUNT_REWARD_UPPER_BOUND * (1 - np.exp(-0.1 * traci.lane.getLastStepHaltingNumber(l)))
 
             else:
@@ -94,7 +94,7 @@ def compute_reward(lanes: list, left_lanes: list, mode: str = "wait", return_com
         else:  # "count"
             count_val = traci.lane.getLastStepHaltingNumber(l)
 
-        penalty = 1.5 if l in left_lanes else 1.0
+        penalty = 1
         
         reward -= (wait_val + count_val) * penalty
         wait_part_total -= wait_val * penalty
@@ -117,9 +117,9 @@ class TrafficEnv:
     NUM_PHASES = 4
     GREEN_PHASES = [0, 2, 4, 6]    # indices of green phases in tlLogic
     YELLOW_DURATION = 3            # sim-seconds for yellow phase
-    MIN_GREEN = 10                 # min green seconds before switch allowed
-    STEP_SIZE = 10                 # T=10 sim-seconds per RL action step
-    MAX_STEPS = 50                 # 50 x 10 s = 500 s per episode
+    MIN_GREEN = 0                 # min green seconds before switch allowed
+    STEP_SIZE = 1                  # T=10 sim-seconds per RL action step
+    MAX_STEPS = 150                # 50 x 10 s = 500 s per episode
     GAMMA = 0.99                   # Discount factor for sim-steps
 
     SCENARIOS = ("uniform", "horizontal", "vertical", "alternate")
@@ -299,17 +299,21 @@ class TrafficEnv:
 
     # -- State & reward --------------------------------------------------------
     def _get_state(self) -> np.ndarray:
-        queues, speeds = [], []
+        queues, waits = [], []
         for group in self.LANE_GROUPS:
             halt = sum(traci.lane.getLastStepHaltingNumber(l) for l in group)
-            spd_sum, max_spd_sum = 0.0, 0.0
+            max_lead_wait = 0.0
             for l in group:
-                spd_sum += traci.lane.getLastStepMeanSpeed(l)
-                max_spd_sum += traci.lane.getMaxSpeed(l)
+                veh_ids = traci.lane.getLastStepVehicleIDs(l)
+                if veh_ids:
+                    lead = max(veh_ids, key=lambda v: traci.vehicle.getLanePosition(v))
+                    lead_wait = traci.vehicle.getWaitingTime(lead)
+                    if lead_wait > max_lead_wait:
+                        max_lead_wait = lead_wait
             queues.append(halt / 25.0)
-            speeds.append(spd_sum / max_spd_sum if max_spd_sum > 0 else 0.0)
+            waits.append(min(max_lead_wait / WAIT_TIME_LIMIT, 1.0))
         return np.array(
-            queues + speeds + [self._green_idx, min(self._phase_time / 60.0, 1.0)],
+            queues + waits + [self._green_idx, min(self._phase_time / 60.0, 1.0)],
             dtype=np.float32,
         )
 
