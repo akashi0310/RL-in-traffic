@@ -35,6 +35,8 @@ import time
 import subprocess
 import numpy as np
 
+import config
+
 # -- TraCI import -------------------------------------------------------------
 if "SUMO_HOME" in os.environ:
     sys.path.insert(0, os.path.join(os.environ["SUMO_HOME"], "tools"))
@@ -55,20 +57,6 @@ WAIT_TIME_LIMIT = 60
 def compute_reward(lanes: list, left_lanes: list, mode: str = "wait", return_components: bool = False) -> float:
     """
     Standardized reward function shared between Environment and Evaluation.
-
-    Parameters
-    ----------
-    lanes : list[str]
-        All entry lanes to include in the reward.
-    left_lanes : list[str]
-        Subset of lanes that get the 1.5x left-turn starvation penalty.
-    mode : str
-        - 'wait'    : Negative waiting time of the lead vehicle (queue head)
-                      on each lane.
-        - 'count'   : Negative number of halting vehicles on the lane.
-        - 'harmonic': Lead-vehicle waiting time + halting count combined.
-    return_components : bool
-        If True, returns (total_reward, wait_part, count_part).
     """
     reward = 0.0
     wait_part_total = 0.0
@@ -88,11 +76,10 @@ def compute_reward(lanes: list, left_lanes: list, mode: str = "wait", return_com
             if mode == "harmonic":
                 wait_val = WAIT_REWARD_UPPER_BOUND / (1 + np.exp(-0.05 * (lead_wait - WAIT_TIME_LIMIT)))
                 count_val = COUNT_REWARD_UPPER_BOUND * (1 - np.exp(-0.1 * traci.lane.getLastStepHaltingNumber(l)))
-
             else:
                 wait_val = lead_wait
         else:  # "count"
-            count_val = traci.lane.getLastStepHaltingNumber(l)
+            count_val = traci.lane.getLastStepHaltingNumber(l) ** 2
 
         penalty = 1
         
@@ -112,37 +99,21 @@ class TrafficEnv:
                    ["N2C_2", "S2C_2"],
                    ["E2C_2", "W2C_2"]]
     ALL_LANES = [l for group in LANE_GROUPS for l in group]
-    TL_ID = "center"
     LEFT_LANES = ["N2C_2", "S2C_2", "E2C_2", "W2C_2"]
+    TL_ID = "center"
     NUM_PHASES = 4
     GREEN_PHASES = [0, 2, 4, 6]    # indices of green phases in tlLogic
-    YELLOW_DURATION = 3            # sim-seconds for yellow phase
-    MIN_GREEN = 0                 # min green seconds before switch allowed
-    STEP_SIZE = 1                  # T=10 sim-seconds per RL action step
-    MAX_STEPS = 150                # 50 x 10 s = 500 s per episode
-    GAMMA = 0.99                   # Discount factor for sim-steps
 
     SCENARIOS = ("uniform", "horizontal", "vertical", "alternate")
 
-    def __init__(self, sumo_cfg: str, use_gui: bool = False, port: int = 8813,
+    def __init__(self, sumo_cfg: str = None, use_gui: bool = False, port: int = 8813,
                  bernoulli_p: float = 0.05, reward_mode: str = "wait",
                  eval_mode: bool = False, drain_step_cap: int = 200,
                  scenario: str = "uniform"):
         """
-        Parameters
-        ----------
-        sumo_cfg : str
-            Path to the base .sumocfg file.
-        use_gui : bool
-            Launch sumo-gui instead of headless sumo.
-        port : int
-            TraCI port.
-        bernoulli_p : float
-            Spawning probability per lane per second (Bernoulli trial).
-        reward_mode : str
-            'wait' (waiting time) or 'count' (halting vehicles).
+        SUMO Traffic Signal Control Environment.
         """
-        self.sumo_cfg = os.path.abspath(sumo_cfg)
+        self.sumo_cfg = os.path.abspath(sumo_cfg or config.SUMO_CFG_PATH)
         self.sumo_dir = os.path.dirname(self.sumo_cfg)
         self.use_gui = use_gui
         self.port = port
@@ -150,15 +121,16 @@ class TrafficEnv:
         self.reward_mode = reward_mode
         self.eval_mode = eval_mode
         self.drain_step_cap = drain_step_cap
+        
         if scenario not in self.SCENARIOS:
             raise ValueError(f"scenario must be one of {self.SCENARIOS}, got {scenario!r}")
         self.scenario = scenario
+        
         self._connected = False
         self._step = 0
         self._phase_time = 0.0
         self._green_idx = 0
 
-    # -- Size properties -------------------------------------------------------
     @property
     def state_size(self) -> int:
         return self.NUM_PHASES * 2 + 2
@@ -167,7 +139,6 @@ class TrafficEnv:
     def action_size(self) -> int:
         return 4
 
-    # -- Internal SUMO control -------------------------------------------------
     def _launch(self):
         binary = "sumo-gui" if self.use_gui else "sumo"
         self._generate_bernoulli_routes()
@@ -182,11 +153,14 @@ class TrafficEnv:
         ]
         if self.use_gui:
             cmd += ["--start", "--delay", "50"]
+        
         self._proc = subprocess.Popen(
             cmd, cwd=self.sumo_dir,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        time.sleep(1.0)          # wait for SUMO to bind the port
+        
+        # Wait for SUMO to bind the port
+        time.sleep(1.0)
         retries = 10
         for i in range(retries):
             try:
@@ -213,17 +187,11 @@ class TrafficEnv:
                 self._proc.kill()
 
     def _set_phase(self, phase_idx: int):
-        """Set a phase and freeze it (disable SUMO's automatic phase advance)."""
         traci.trafficlight.setPhase(self.TL_ID, phase_idx)
         traci.trafficlight.setPhaseDuration(self.TL_ID, 999_999)
 
     def _scenario_segments(self):
-        """
-        Return list of (begin, end, p_horiz, p_vert) tuples that define the
-        per-direction Bernoulli probability over time for the current scenario.
-        Horizontal = E2C/W2C; Vertical = N2C/S2C.
-        """
-        end_time = self.MAX_STEPS * self.STEP_SIZE
+        end_time = config.MAX_STEPS * config.STEP_SIZE
         hi = self.bernoulli_p
         lo = self.bernoulli_p / 2.0
 
@@ -248,10 +216,7 @@ class TrafficEnv:
         raise ValueError(self.scenario)
 
     def _generate_bernoulli_routes(self):
-        """Generate a Bernoulli distribution route file where each lane independently spawns vehicles."""
         filepath = os.path.join(self.sumo_dir, BERNOULLI_ROUTE_FILE)
-
-        # Directions: from -> [straight, right, left]
         directions = {
             "W2C": ["C2E", "C2S", "C2N"],
             "E2C": ["C2W", "C2N", "C2S"],
@@ -277,19 +242,11 @@ class TrafficEnv:
 
                 for si, (begin, end, p_h, p_v) in enumerate(segments):
                     p = p_h if src_edge in horizontal else p_v
-                    # Lane 0 (straight/right)
-                    f.write(f'    <flow id="flow_{src_edge}_0_s{si}" route="{src_edge}_sr" type="mixed_traffic" '
-                            f'begin="{begin}" end="{end}" probability="{p}" '
-                            f'departLane="0" departSpeed="max"/>\n')
-                    # Lane 1 (straight/right)
-                    f.write(f'    <flow id="flow_{src_edge}_1_s{si}" route="{src_edge}_sr" type="mixed_traffic" '
-                            f'begin="{begin}" end="{end}" probability="{p}" '
-                            f'departLane="1" departSpeed="max"/>\n')
-                    # Lane 2 (left)
-                    f.write(f'    <flow id="flow_{src_edge}_2_s{si}" route="{src_edge}_l" type="mixed_traffic" '
-                            f'begin="{begin}" end="{end}" probability="{p}" '
-                            f'departLane="2" departSpeed="max"/>\n')
-
+                    for lane in range(3):
+                        route = f"{src_edge}_sr" if lane < 2 else f"{src_edge}_l"
+                        f.write(f'    <flow id="flow_{src_edge}_{lane}_s{si}" route="{route}" type="mixed_traffic" '
+                                f'begin="{begin}" end="{end}" probability="{p}" '
+                                f'departLane="{lane}" departSpeed="max"/>\n')
             f.write('</routes>\n')
 
     def set_scenario(self, scenario: str):
@@ -297,7 +254,6 @@ class TrafficEnv:
             raise ValueError(f"scenario must be one of {self.SCENARIOS}, got {scenario!r}")
         self.scenario = scenario
 
-    # -- State & reward --------------------------------------------------------
     def _get_state(self) -> np.ndarray:
         queues, waits = [], []
         for group in self.LANE_GROUPS:
@@ -317,55 +273,48 @@ class TrafficEnv:
             dtype=np.float32,
         )
 
-    def _get_reward(self, return_components: bool = False):
-        return compute_reward(self.ALL_LANES, self.LEFT_LANES, mode=self.reward_mode, return_components=return_components)
-
-    # -- Gym-style API ---------------------------------------------------------
     def reset(self) -> np.ndarray:
-        if self._connected:
-            self._close()
+        self._close()
         self._step = 0
         self._phase_time = 0.0
         self._green_idx = 0
-        self._is_yellow = False
         self._launch()
         self._set_phase(self.GREEN_PHASES[self._green_idx])
-        for _ in range(5):           # warm-up: let a few vehicles spawn
+        # Short warm-up
+        for _ in range(5):
             traci.simulationStep()
         return self._get_state()
 
     def step(self, action: int):
-        scoring = self._step < self.MAX_STEPS
-
-        if action != 0 and self._phase_time >= self.MIN_GREEN:
+        # Action is Delta: 0=STAY, 1=FORWARD, 2=DIAGONAL, 3=BACKWARD
+        if action != 0 and self._phase_time >= config.MIN_GREEN:
+            # Transition via yellow
             yellow = self.GREEN_PHASES[self._green_idx] + 1
             self._set_phase(yellow)
-            for _ in range(self.YELLOW_DURATION):
+            for _ in range(config.YELLOW_DURATION):
                 traci.simulationStep()
 
             self._green_idx = (self._green_idx + action) % self.NUM_PHASES
             self._set_phase(self.GREEN_PHASES[self._green_idx])
             self._phase_time = 0.0
 
-        for _ in range(self.STEP_SIZE):
+        for _ in range(config.STEP_SIZE):
             traci.simulationStep()
 
-        # Calculate reward ONCE for the entire 10s step
-        if scoring:
-            reward, wait_sum, count_sum = self._get_reward(return_components=True)
-        else:
-            reward, wait_sum, count_sum = 0.0, 0.0, 0.0
+        reward, wait_sum, count_sum = compute_reward(
+            self.ALL_LANES, self.LEFT_LANES, mode=self.reward_mode, return_components=True
+        )
 
-        self._phase_time += self.STEP_SIZE
+        self._phase_time += config.STEP_SIZE
         self._step += 1
 
         if self.eval_mode:
-            past_spawn = self._step >= self.MAX_STEPS
+            past_spawn = self._step >= config.MAX_STEPS
             cleared = past_spawn and traci.simulation.getMinExpectedNumber() == 0
-            hit_cap = self._step >= self.MAX_STEPS + self.drain_step_cap
+            hit_cap = self._step >= config.MAX_STEPS + self.drain_step_cap
             done = cleared or hit_cap
         else:
-            done = self._step >= self.MAX_STEPS
+            done = self._step >= config.MAX_STEPS
 
         if done:
             self._close()

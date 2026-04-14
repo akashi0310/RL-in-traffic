@@ -18,6 +18,8 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
+import config
+
 
 # ── Q-Network ─────────────────────────────────────────────────────────────────
 class QNetwork(nn.Module):
@@ -66,14 +68,15 @@ class DQNAgent:
         self,
         state_size: int,
         action_size: int,
-        lr: float = 5e-4,
-        gamma: float = 0.99,
-        epsilon_start: float = 1.0,
-        epsilon_end: float = 0.01,
-        epsilon_decay: float = 0.999,
-        batch_size: int = 64,
-        target_update: int = 100,
-        buffer_cap: int = 20_000,
+        lr: float = config.LR,
+        gamma: float = config.GAMMA,
+        epsilon_start: float = config.EPSILON_START,
+        epsilon_end: float = config.EPSILON_END,
+        epsilon_decay: float = config.EPSILON_DECAY,
+        batch_size: int = config.BATCH_SIZE,
+        target_update: int = config.TARGET_UPDATE,
+        buffer_cap: int = config.BUFFER_CAPACITY,
+        hidden_size: int = config.HIDDEN_SIZE,
     ):
         self.action_size = action_size
         self.gamma = gamma
@@ -86,8 +89,8 @@ class DQNAgent:
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.q_net = QNetwork(state_size, action_size).to(self.device)
-        self.target_net = QNetwork(state_size, action_size).to(self.device)
+        self.q_net = QNetwork(state_size, action_size, hidden=hidden_size).to(self.device)
+        self.target_net = QNetwork(state_size, action_size, hidden=hidden_size).to(self.device)
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.target_net.eval()
 
@@ -95,11 +98,13 @@ class DQNAgent:
         self.buffer = ReplayBuffer(buffer_cap)
         self.loss_fn = nn.SmoothL1Loss()   # Huber loss
 
-    def select_action(self, state: np.ndarray) -> int:
-        if random.random() < self.epsilon:
+    def select_action(self, state: np.ndarray, training: bool = True) -> int:
+        if training and random.random() < self.epsilon:
             return random.randrange(self.action_size)
         with torch.no_grad():
-            s = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+            s = torch.FloatTensor(state).to(self.device)
+            if s.ndim == 1:
+                s = s.unsqueeze(0)
             return self.q_net(s).argmax(dim=1).item()
 
     def store(self, state, action, reward, next_state, done):
