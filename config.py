@@ -7,7 +7,7 @@ CHECKPOINT_DIR = os.path.join(BASE_DIR, "checkpoints")
 SUMO_CFG_PATH = os.path.join(DATA_DIR, "new_sim.sumocfg")
 
 # -- RL Settings --
-REWARD_SCALE = 1e-3
+REWARD_SCALE = 1e-4
 
 # -- Environment Settings --
 STEP_SIZE = 1
@@ -16,12 +16,13 @@ YELLOW_DURATION = 3
 MIN_GREEN = 0
 
 # -- Agent Defaults --
-HIDDEN_SIZE = 400
-BATCH_SIZE = 64
-BUFFER_CAPACITY = 20_000
-LR = 5e-4
+HIDDEN_SIZE = 200
+BATCH_SIZE = 128
+BUFFER_CAPACITY = 2000
+LR = 5e-3
 GAMMA = 0.99
 EPSILON_START = 1.0
-EPSILON_END = 0.01
-EPSILON_DECAY = 0.999
+EPSILON_END = 0.05
+EPSILON_DECAY = 0.995
 TARGET_UPDATE = 100
+USE_DDQN = False    

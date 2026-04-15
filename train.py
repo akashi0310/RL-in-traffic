@@ -11,7 +11,7 @@ from utils.plots import plot_training
 
 def train(num_episodes: int = 100, use_gui: bool = False, resume: str = None,
           bernoulli_p: float = 0.05, reward_mode: str = "harmonic",
-          scenario: str = None):
+          scenario: str = None, use_ddqn: bool = config.USE_DDQN):
     
     os.makedirs(config.CHECKPOINT_DIR, exist_ok=True)
 
@@ -20,7 +20,7 @@ def train(num_episodes: int = 100, use_gui: bool = False, resume: str = None,
     
     env = TrafficEnv(use_gui=use_gui, bernoulli_p=bernoulli_p, 
                      reward_mode=reward_mode, scenario=scenario_cycle[0])
-    agent = DQNAgent(state_size=env.state_size, action_size=env.action_size)
+    agent = DQNAgent(state_size=env.state_size, action_size=env.action_size, use_double=use_ddqn)
 
     if resume and os.path.isfile(resume):
         agent.load(resume)
@@ -46,6 +46,7 @@ def train(num_episodes: int = 100, use_gui: bool = False, resume: str = None,
     print(f"  DQN Traffic Signal Control - Training")
     print(f"  Episodes    : {num_episodes}")
     print(f"  Bernoulli p : {bernoulli_p}")
+    print(f"  Double DQN  : {use_ddqn}")
     print(f"  Scenario    : {'Cycle All' if scenario is None else scenario}")
     print(f"  Device      : {agent.device}")
     print(f"{'='*60}\n")
@@ -160,8 +161,10 @@ if __name__ == "__main__":
     parser.add_argument("--scenario", type=str, default=None,
                         choices=list(TrafficEnv.SCENARIOS),
                         help="Pin training to a single scenario")
+    parser.add_argument("--ddqn", action="store_true", default=config.USE_DDQN,
+                        help="Use Double DQN")
     args = parser.parse_args()
 
     train(num_episodes=args.episodes, use_gui=args.gui, resume=args.resume,
           bernoulli_p=args.prob, reward_mode=args.reward_mode,
-          scenario=args.scenario)
+          scenario=args.scenario, use_ddqn=args.ddqn)

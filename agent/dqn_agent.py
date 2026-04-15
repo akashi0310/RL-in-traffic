@@ -77,6 +77,7 @@ class DQNAgent:
         target_update: int = config.TARGET_UPDATE,
         buffer_cap: int = config.BUFFER_CAPACITY,
         hidden_size: int = config.HIDDEN_SIZE,
+        use_double: bool = config.USE_DDQN,
     ):
         self.action_size = action_size
         self.gamma = gamma
@@ -85,6 +86,7 @@ class DQNAgent:
         self.epsilon_decay = epsilon_decay
         self.batch_size = batch_size
         self.target_update = target_update
+        self.use_double = use_double
         self._update_count = 0
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -123,9 +125,17 @@ class DQNAgent:
         dones       = dones.to(self.device)
 
         q_curr = self.q_net(states).gather(1, actions.unsqueeze(1)).squeeze(1)
-
+        
         with torch.no_grad():
-            q_next   = self.target_net(next_states).max(dim=1)[0]
+            if self.use_double:
+                # Use online network (q_net) to select the best action
+                next_actions = self.q_net(next_states).argmax(dim=1, keepdim=True)
+                # Use target network (target_net) to evaluate that action
+                q_next = self.target_net(next_states).gather(1, next_actions).squeeze(1)
+            else:
+                # Standard DQN: use target network for both selection and evaluation
+                q_next = self.target_net(next_states).max(dim=1)[0]
+                
             q_target = rewards + self.gamma * q_next * (1.0 - dones)
 
         loss = self.loss_fn(q_curr, q_target)

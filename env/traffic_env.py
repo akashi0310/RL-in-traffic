@@ -54,13 +54,45 @@ COUNT_REWARD_UPPER_BOUND = 10
 WAIT_REWARD_UPPER_BOUND = 15
 WAIT_TIME_LIMIT = 60
 
+_LANE_RED_TIMES = {}
+_LAST_SIM_TIME = -1
+_CONTROLLED_LANES_CACHE = None
+
 def compute_reward(lanes: list, left_lanes: list, mode: str = "wait", return_components: bool = False) -> float | tuple[float, float, float]:
     """
     Standardized reward function shared between Environment and Evaluation.
+    Now uses consecutive red time of the lane phase instead of individual vehicle wait times.
     """
+    global _LANE_RED_TIMES, _LAST_SIM_TIME, _CONTROLLED_LANES_CACHE
     reward = 0.0
     wait_part_total = 0.0
     count_part_total = 0.0
+
+    # Track consecutive red time per lane across calls
+    try:
+        curr_time = traci.simulation.getTime()
+        if curr_time < _LAST_SIM_TIME:
+            _LANE_RED_TIMES = {}
+        
+        dt = max(0, curr_time - _LAST_SIM_TIME) if _LAST_SIM_TIME != -1 else 0
+        _LAST_SIM_TIME = curr_time
+        
+        tls_id = "center"
+        if _CONTROLLED_LANES_CACHE is None:
+            _CONTROLLED_LANES_CACHE = traci.trafficlight.getControlledLanes(tls_id)
+        
+        state = traci.trafficlight.getRedYellowGreenState(tls_id)
+        for i, l_id in enumerate(_CONTROLLED_LANES_CACHE):
+            if l_id not in _LANE_RED_TIMES:
+                _LANE_RED_TIMES[l_id] = 0.0
+            
+            if state[i] in 'rR':
+                _LANE_RED_TIMES[l_id] += dt
+            else:
+                _LANE_RED_TIMES[l_id] = 0.0
+    except Exception:
+        # Fallback for cases where TraCI/TLS is not ready
+        pass
 
     for l in lanes:
         wait_val = 0.0
@@ -72,9 +104,9 @@ def compute_reward(lanes: list, left_lanes: list, mode: str = "wait", return_com
         if mode == "harmonic" or mode == "wait":
             veh_ids = traci.lane.getLastStepVehicleIDs(l)
             lead_wait = 0.0
+            # Use the tracked consecutive red time if vehicles are present
             if veh_ids:
-                lead = max(veh_ids, key=lambda v: traci.vehicle.getLanePosition(v))
-                lead_wait = traci.vehicle.getWaitingTime(lead)
+                lead_wait = _LANE_RED_TIMES.get(l, 0.0)
 
             if mode == "harmonic":
                 wait_val = WAIT_REWARD_UPPER_BOUND / (1 + np.exp(-0.05 * (lead_wait - WAIT_TIME_LIMIT)))
