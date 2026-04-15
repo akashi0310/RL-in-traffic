@@ -25,7 +25,7 @@ import config
 class QNetwork(nn.Module):
     """Two-hidden-layer MLP: state → Q(state, action) for each action."""
 
-    def __init__(self, state_size: int, action_size: int, hidden: int = 400):
+    def __init__(self, state_size: int, action_size: int, hidden: int = 200):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(state_size, hidden),

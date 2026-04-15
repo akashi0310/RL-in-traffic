@@ -9,16 +9,16 @@
     <route id="W2C_r" edges="W2C C2S"/>
     <route id="W2C_l" edges="W2C C2N"/>
     <routeDistribution id="W2C_sr" routes="W2C_s W2C_r" probabilities="0.7 0.3"/>
-    <flow id="flow_W2C_0_s0" route="W2C_sr" type="mixed_traffic" begin="0" end="150" probability="0.1" departLane="0" departSpeed="max"/>
-    <flow id="flow_W2C_1_s0" route="W2C_sr" type="mixed_traffic" begin="0" end="150" probability="0.1" departLane="1" departSpeed="max"/>
-    <flow id="flow_W2C_2_s0" route="W2C_l" type="mixed_traffic" begin="0" end="150" probability="0.1" departLane="2" departSpeed="max"/>
+    <flow id="flow_W2C_0_s0" route="W2C_sr" type="mixed_traffic" begin="0" end="150" probability="0.2" departLane="0" departSpeed="max"/>
+    <flow id="flow_W2C_1_s0" route="W2C_sr" type="mixed_traffic" begin="0" end="150" probability="0.2" departLane="1" departSpeed="max"/>
+    <flow id="flow_W2C_2_s0" route="W2C_l" type="mixed_traffic" begin="0" end="150" probability="0.2" departLane="2" departSpeed="max"/>
     <route id="E2C_s" edges="E2C C2W"/>
     <route id="E2C_r" edges="E2C C2N"/>
     <route id="E2C_l" edges="E2C C2S"/>
     <routeDistribution id="E2C_sr" routes="E2C_s E2C_r" probabilities="0.7 0.3"/>
-    <flow id="flow_E2C_0_s0" route="E2C_sr" type="mixed_traffic" begin="0" end="150" probability="0.1" departLane="0" departSpeed="max"/>
-    <flow id="flow_E2C_1_s0" route="E2C_sr" type="mixed_traffic" begin="0" end="150" probability="0.1" departLane="1" departSpeed="max"/>
-    <flow id="flow_E2C_2_s0" route="E2C_l" type="mixed_traffic" begin="0" end="150" probability="0.1" departLane="2" departSpeed="max"/>
+    <flow id="flow_E2C_0_s0" route="E2C_sr" type="mixed_traffic" begin="0" end="150" probability="0.2" departLane="0" departSpeed="max"/>
+    <flow id="flow_E2C_1_s0" route="E2C_sr" type="mixed_traffic" begin="0" end="150" probability="0.2" departLane="1" departSpeed="max"/>
+    <flow id="flow_E2C_2_s0" route="E2C_l" type="mixed_traffic" begin="0" end="150" probability="0.2" departLane="2" departSpeed="max"/>
     <route id="N2C_s" edges="N2C C2S"/>
     <route id="N2C_r" edges="N2C C2W"/>
     <route id="N2C_l" edges="N2C C2E"/>

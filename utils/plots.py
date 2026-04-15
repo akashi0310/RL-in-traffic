@@ -9,6 +9,7 @@ def moving_average(values, window=10):
 def plot_training(rewards, losses, wait_parts=None, count_parts=None, save_path="training_results.png"):
     """
     Plots training rewards, losses, and optional component breakdowns.
+    Expects step-wise data to show granularity per action selection.
     """
     n_rows = 3 if wait_parts is not None else 2
     fig, axes = plt.subplots(n_rows, 1, figsize=(12, 4.5 * n_rows), facecolor="#1e1e2e")
@@ -23,26 +24,37 @@ def plot_training(rewards, losses, wait_parts=None, count_parts=None, save_path=
         ax.yaxis.label.set_color("#cdd6f4")
         ax.title.set_color("#cba6f7")
 
-    # Reward panel
-    episodes = np.arange(1, len(rewards) + 1)
-    axes[0].scatter(episodes, rewards, color="#94e2d5", alpha=0.35, s=14)
-    if len(rewards) >= 5:
-        sm = moving_average(rewards, window=5)
-        axes[0].plot(episodes[4:], sm, color="#94e2d5", linewidth=2.2,
-                     label="Moving avg (5 ep)")
-    axes[0].set_xlabel("Episode")
-    axes[0].set_ylabel("Total Reward")
-    axes[0].set_title("Training Reward (higher = better performance)")
+    # Reward panel (Step-wise)
+    steps = np.arange(1, len(rewards) + 1)
+    # Scatter with low alpha to see density
+    axes[0].scatter(steps, rewards, color="#94e2d5", alpha=0.15, s=6)
+    
+    if len(rewards) >= 100:
+        window = 100
+        sm = moving_average(rewards, window=window)
+        axes[0].plot(steps[window-1:], sm, color="#94e2d5", linewidth=2.5,
+                     label=f"Moving avg ({window} steps)")
+    
+    axes[0].set_xlabel("Decision Point (Action Selection)")
+    axes[0].set_ylabel("Step Reward")
+    axes[0].set_title("Training Reward (per Step)")
     axes[0].legend(facecolor="#313244", labelcolor="#cdd6f4",
                    fontsize=9, loc="lower right")
     axes[0].grid(True, color="#313244", alpha=0.6)
 
-    # Loss panel
-    axes[1].plot(losses, color="#f38ba8", alpha=0.5, linewidth=1)
-    if len(losses) >= 10:
-        axes[1].plot(np.arange(10, len(losses) + 1), moving_average(losses),
-                     color="#f38ba8", linewidth=2.2, label="Moving avg (10 ep)")
-    axes[1].set_xlabel("Episode")
+    # Loss panel (Step-wise)
+    # Note: agents might start updating late, so we match based on the last N steps if needed,
+    # but here we just plot the sequence of recorded losses.
+    loss_steps = np.arange(1, len(losses) + 1)
+    axes[1].plot(loss_steps, losses, color="#f38ba8", alpha=0.4, linewidth=1)
+    
+    if len(losses) >= 100:
+        window = 100
+        sm_loss = moving_average(losses, window=window)
+        axes[1].plot(loss_steps[window-1:], sm_loss,
+                     color="#f38ba8", linewidth=2.5, label=f"Moving avg ({window} steps)")
+                     
+    axes[1].set_xlabel("Update Step")
     axes[1].set_ylabel("Loss (Huber)")
     axes[1].set_title("Training Loss")
     axes[1].legend(facecolor="#313244", labelcolor="#cdd6f4")
@@ -50,14 +62,15 @@ def plot_training(rewards, losses, wait_parts=None, count_parts=None, save_path=
 
     # Component panel (if provided)
     if wait_parts is not None and count_parts is not None:
-        # Use two lines for clarity
-        axes[2].plot(episodes, wait_parts, color="#fab387", alpha=0.7, label="Wait Component")
-        axes[2].plot(episodes, count_parts, color="#89b4fa", alpha=0.7, label="Count Component")
-        if len(wait_parts) >= 5:
-            axes[2].plot(episodes[4:], moving_average(wait_parts, 5), color="#fab387", linewidth=2)
-            axes[2].plot(episodes[4:], moving_average(count_parts, 5), color="#89b4fa", linewidth=2)
-        axes[2].set_xlabel("Episode")
-        axes[2].set_ylabel("Component Reward (Unscaled)")
+        axes[2].plot(steps, wait_parts, color="#fab387", alpha=0.5, label="Wait Component")
+        axes[2].plot(steps, count_parts, color="#89b4fa", alpha=0.5, label="Count Component")
+        
+        if len(wait_parts) >= 100:
+            axes[2].plot(steps[99:], moving_average(wait_parts, 100), color="#fab387", linewidth=2)
+            axes[2].plot(steps[99:], moving_average(count_parts, 100), color="#89b4fa", linewidth=2)
+            
+        axes[2].set_xlabel("Decision Point (Action Selection)")
+        axes[2].set_ylabel("Component Reward")
         axes[2].set_title("Reward Breakdown (Harmonic Components)")
         axes[2].legend(facecolor="#313244", labelcolor="#cdd6f4")
         axes[2].grid(True, color="#313244", alpha=0.6)

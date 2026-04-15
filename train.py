@@ -25,10 +25,17 @@ def train(num_episodes: int = 100, use_gui: bool = False, resume: str = None,
     if resume and os.path.isfile(resume):
         agent.load(resume)
 
-    losses_log = []
-    rewards_log = []
-    wait_log = []
-    count_log = []
+    losses_log = []    # Episode average losses
+    rewards_log = []   # Episode total rewards
+    wait_log = []      # Episode total wait penalty
+    count_log = []     # Episode total count penalty
+    
+    # Step-wise logs for higher resolution plotting
+    step_rewards = []
+    step_losses = []
+    step_wait = []
+    step_count = []
+    
     best_reward = -float("inf")
 
     # Session identifier
@@ -68,6 +75,14 @@ def train(num_episodes: int = 100, use_gui: bool = False, resume: str = None,
                 total_reward += reward
                 ep_wait += info.get("wait_part", 0.0)
                 ep_count += info.get("count_part", 0.0)
+                
+                # Record step-wise data
+                step_rewards.append(reward)
+                step_wait.append(info.get("wait_part", 0.0))
+                step_count.append(info.get("count_part", 0.0))
+                if loss is not None:
+                    step_losses.append(loss)
+                
                 state = next_state
                 
                 if done:
@@ -121,9 +136,9 @@ def train(num_episodes: int = 100, use_gui: bool = False, resume: str = None,
     finally:
         env.close()
 
-    if rewards_log:
+    if step_rewards:
         agent.save(os.path.join(config.CHECKPOINT_DIR, "dqn_final.pt"))
-        plot_training(rewards_log, losses_log, wait_log, count_log, save_path=session_plot_path)
+        plot_training(step_rewards, step_losses, step_wait, step_count, save_path=session_plot_path)
         print(f"\n  Training complete. Best cycle reward: {best_reward:.1f}")
     
     return agent, rewards_log

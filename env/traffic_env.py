@@ -54,7 +54,7 @@ COUNT_REWARD_UPPER_BOUND = 10
 WAIT_REWARD_UPPER_BOUND = 15
 WAIT_TIME_LIMIT = 60
 
-def compute_reward(lanes: list, left_lanes: list, mode: str = "wait", return_components: bool = False) -> float:
+def compute_reward(lanes: list, left_lanes: list, mode: str = "wait", return_components: bool = False) -> float | tuple[float, float, float]:
     """
     Standardized reward function shared between Environment and Evaluation.
     """
@@ -66,6 +66,9 @@ def compute_reward(lanes: list, left_lanes: list, mode: str = "wait", return_com
         wait_val = 0.0
         count_val = 0.0
 
+        pending_count = len(traci.lane.getPendingVehicles(l))
+        halting_count = traci.lane.getLastStepHaltingNumber(l) + pending_count
+
         if mode == "harmonic" or mode == "wait":
             veh_ids = traci.lane.getLastStepVehicleIDs(l)
             lead_wait = 0.0
@@ -75,11 +78,14 @@ def compute_reward(lanes: list, left_lanes: list, mode: str = "wait", return_com
 
             if mode == "harmonic":
                 wait_val = WAIT_REWARD_UPPER_BOUND / (1 + np.exp(-0.05 * (lead_wait - WAIT_TIME_LIMIT)))
-                count_val = COUNT_REWARD_UPPER_BOUND * (1 - np.exp(-0.1 * traci.lane.getLastStepHaltingNumber(l)))
+                count_val = COUNT_REWARD_UPPER_BOUND * (1 - np.exp(-0.1 * halting_count))
             else:
                 wait_val = lead_wait
+                # Add a linear penalty for pending vehicles in "wait" mode 
+                # to ensure total penalty keeps raising when lane is full
+                count_val = pending_count 
         else:  # "count"
-            count_val = traci.lane.getLastStepHaltingNumber(l) ** 2
+            count_val = halting_count ** 2
 
         penalty = 1
         
@@ -106,7 +112,7 @@ class TrafficEnv:
 
     SCENARIOS = ("uniform", "horizontal", "vertical", "alternate")
 
-    def __init__(self, sumo_cfg: str = None, use_gui: bool = False, port: int = 8813,
+    def __init__(self, sumo_cfg: str | None = None, use_gui: bool = False, port: int = 8813,
                  bernoulli_p: float = 0.05, reward_mode: str = "wait",
                  eval_mode: bool = False, drain_step_cap: int = 200,
                  scenario: str = "uniform"):
@@ -257,7 +263,8 @@ class TrafficEnv:
     def _get_state(self) -> np.ndarray:
         queues, waits = [], []
         for group in self.LANE_GROUPS:
-            halt = sum(traci.lane.getLastStepHaltingNumber(l) for l in group)
+            # Include pending (backlogged) vehicles in the queue state
+            halt = sum(traci.lane.getLastStepHaltingNumber(l) + len(traci.lane.getPendingVehicles(l)) for l in group)
             max_lead_wait = 0.0
             for l in group:
                 veh_ids = traci.lane.getLastStepVehicleIDs(l)
@@ -301,6 +308,7 @@ class TrafficEnv:
         for _ in range(config.STEP_SIZE):
             traci.simulationStep()
 
+        # Calculate reward and its components
         reward, wait_sum, count_sum = compute_reward(
             self.ALL_LANES, self.LEFT_LANES, mode=self.reward_mode, return_components=True
         )
