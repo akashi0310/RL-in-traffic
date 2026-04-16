@@ -7,7 +7,7 @@ CHECKPOINT_DIR = os.path.join(BASE_DIR, "checkpoints")
 SUMO_CFG_PATH = os.path.join(DATA_DIR, "new_sim.sumocfg")
 
 # -- RL Settings --
-REWARD_SCALE = 1e-4
+REWARD_SCALE = 1e-3
 
 # -- Environment Settings --
 STEP_SIZE = 1

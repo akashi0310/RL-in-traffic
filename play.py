@@ -5,7 +5,7 @@ import config
 from env.traffic_env import TrafficEnv
 from agent.dqn_agent import DQNAgent
 
-ACTION_NAMES = ["STAY", "FORWARD (+1)", "DIAGONAL (+2)", "BACKWARD (+3)"]
+ACTION_NAMES = ["STAY", "NEXT PHASE"]
 PHASE_NAMES = ["N-S straight", "E-W straight", "N-S turn", "E-W turn"]
 
 

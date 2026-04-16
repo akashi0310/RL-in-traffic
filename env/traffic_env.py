@@ -15,11 +15,9 @@ State (10-dim float32):
    current_green_phase,                            <- 0..3
    phase_time_norm]                                <- seconds / 60
 
-Actions (square layout: 0-1-2-3 as corners):
+Actions:
   0 -> stay at current green phase
-  1 -> forward  (next phase, +1 mod 4)
-  2 -> diagonal (opposite phase, +2 mod 4)
-  3 -> backward (previous phase, +3 mod 4)
+  1 -> next green phase (+1 mod 4)
 
 Reward: - sum halting vehicles / waiting time across all lanes (per sim-step sum)
 
@@ -125,6 +123,8 @@ def compute_reward(lanes: list, left_lanes: list, mode: str = "wait", return_com
         wait_part_total -= wait_val * penalty
         count_part_total -= count_val * penalty
 
+    reward = -np.sqrt(max(0, -reward))
+
     if return_components:
         return reward, wait_part_total, count_part_total
     return reward
@@ -175,7 +175,7 @@ class TrafficEnv:
 
     @property
     def action_size(self) -> int:
-        return 4
+        return 2
 
     def _launch(self):
         binary = "sumo-gui" if self.use_gui else "sumo"
@@ -325,15 +325,15 @@ class TrafficEnv:
         return self._get_state()
 
     def step(self, action: int):
-        # Action is Delta: 0=STAY, 1=FORWARD, 2=DIAGONAL, 3=BACKWARD
-        if action != 0 and self._phase_time >= config.MIN_GREEN:
+        # Action: 0=STAY, 1=NEXT
+        if action == 1 and self._phase_time >= config.MIN_GREEN:
             # Transition via yellow
             yellow = self.GREEN_PHASES[self._green_idx] + 1
             self._set_phase(yellow)
             for _ in range(config.YELLOW_DURATION):
                 traci.simulationStep()
 
-            self._green_idx = (self._green_idx + action) % self.NUM_PHASES
+            self._green_idx = (self._green_idx + 1) % self.NUM_PHASES
             self._set_phase(self.GREEN_PHASES[self._green_idx])
             self._phase_time = 0.0
 
