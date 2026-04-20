@@ -5,6 +5,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 CHECKPOINT_DIR = os.path.join(BASE_DIR, "checkpoints")
 SUMO_CFG_PATH = os.path.join(DATA_DIR, "new_sim.sumocfg")
+LOGS_DIR = os.path.join(BASE_DIR, "logs")
+
 
 # -- RL Settings --
 REWARD_SCALE = 1e-3
@@ -15,7 +17,7 @@ MAX_STEPS = 150
 EVAL_STEPS = 300
 EVAL_DURATION = 500
 YELLOW_DURATION = 3
-MIN_GREEN = 10
+MIN_GREEN = 0
 SWITCH_PENALTY = 5.0
 
 # -- Agent Defaults --
@@ -29,6 +31,9 @@ EPSILON_END = 0.05
 EPSILON_DECAY = 0.995
 TARGET_UPDATE = 100
 USE_DDQN = False    
+
+# -- Model Selection --
+MODEL_TYPE = "MLP"  # "MLP" or "RNN"
 
 # -- RNN Settings --
 SEQUENCE_LENGTH = 10

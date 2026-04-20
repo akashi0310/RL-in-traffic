@@ -47,9 +47,6 @@ except ImportError as e:
 
 
 BERNOULLI_ROUTE_FILE = "bernoulli.rou.xml"
-COUNT_REWARD_UPPER_BOUND = 10
-WAIT_REWARD_UPPER_BOUND = 15
-WAIT_TIME_LIMIT = 100
 
 def compute_reward(lanes: list, left_lanes: list, return_components: bool = False) -> float | tuple[float, float, float]:
     """
@@ -66,7 +63,7 @@ def compute_reward(lanes: list, left_lanes: list, return_components: bool = Fals
         reward -= count_val
         count_part_total -= count_val
 
-    reward = -np.sqrt(max(0, -reward))
+    # reward = -np.sqrt(max(0, -reward))
 
     if return_components:
         return reward, 0.0, count_part_total

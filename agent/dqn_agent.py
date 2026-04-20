@@ -2,6 +2,7 @@
 agent/dqn_agent.py
 ==================
 Deep Q-Network (DQN) agent with:
+  - MLP and RNN (LSTM) architectures
   - Experience replay buffer
   - Target network (synced every `target_update` gradient steps)
   - ε-greedy exploration with exponential decay
@@ -19,6 +20,24 @@ import torch.nn as nn
 import torch.optim as optim
 
 import config
+
+
+# ── MLP Q-Network ─────────────────────────────────────────────────────────────
+class MLPQNetwork(nn.Module):
+    """Standard Feedforward network: state → Q(s, a)"""
+
+    def __init__(self, state_size: int, action_size: int, hidden: int = config.HIDDEN_SIZE):
+        super().__init__()
+        self.fc = nn.Sequential(
+            nn.Linear(state_size, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, hidden),
+            nn.ReLU(),
+            nn.Linear(hidden, action_size)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.fc(x)
 
 
 # ── Recurrent Q-Network ────────────────────────────────────────────────────────
@@ -51,18 +70,21 @@ class ReplayBuffer:
     def __init__(self, capacity: int = 20_000):
         self.buf = deque(maxlen=capacity)
 
-    def push(self, state_seq, action, reward, next_state_seq, done):
-        """Each entry is a sequence of length L"""
-        self.buf.append((state_seq, action, reward, next_state_seq, done))
+    def push(self, state, action, reward, next_state, done):
+        self.buf.append((state, action, reward, next_state, done))
 
     def sample(self, batch_size: int):
         batch = random.sample(self.buf, batch_size)
         s, a, r, ns, d = zip(*batch)
+        
+        s_arr = np.array(s, dtype=np.float32)
+        ns_arr = np.array(ns, dtype=np.float32)
+
         return (
-            torch.FloatTensor(np.array(s)),
+            torch.from_numpy(s_arr),
             torch.LongTensor(a),
             torch.FloatTensor(r),
-            torch.FloatTensor(np.array(ns)),
+            torch.from_numpy(ns_arr),
             torch.FloatTensor(d),
         )
 
@@ -70,7 +92,7 @@ class ReplayBuffer:
         return len(self.buf)
 
 
-# ── DQN Agent (Recurrent) ─────────────────────────────────────────────────────
+# ── DQN Agent ─────────────────────────────────────────────────────────────────
 class DQNAgent:
     def __init__(
         self,
@@ -84,9 +106,10 @@ class DQNAgent:
         batch_size: int = config.BATCH_SIZE,
         target_update: int = config.TARGET_UPDATE,
         buffer_cap: int = config.BUFFER_CAPACITY,
-        hidden_size: int = config.RNN_HIDDEN_SIZE,
+        hidden_size: int = None,
         use_double: bool = config.USE_DDQN,
         seq_len: int = config.SEQUENCE_LENGTH,
+        model_type: str = config.MODEL_TYPE
     ):
         self.state_size = state_size
         self.action_size = action_size
@@ -98,12 +121,21 @@ class DQNAgent:
         self.target_update = target_update
         self.use_double = use_double
         self.seq_len = seq_len
+        self.model_type = model_type
+        self.is_recurrent = (model_type == "RNN")
         self._update_count = 0
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.q_net = RecurrentQNetwork(state_size, action_size, hidden=hidden_size).to(self.device)
-        self.target_net = RecurrentQNetwork(state_size, action_size, hidden=hidden_size).to(self.device)
+        if self.is_recurrent:
+            h = hidden_size or config.RNN_HIDDEN_SIZE
+            self.q_net = RecurrentQNetwork(state_size, action_size, hidden=h).to(self.device)
+            self.target_net = RecurrentQNetwork(state_size, action_size, hidden=h).to(self.device)
+        else:
+            h = hidden_size or config.HIDDEN_SIZE
+            self.q_net = MLPQNetwork(state_size, action_size, hidden=h).to(self.device)
+            self.target_net = MLPQNetwork(state_size, action_size, hidden=h).to(self.device)
+
         self.target_net.load_state_dict(self.q_net.state_dict())
         self.target_net.eval()
 
@@ -111,9 +143,9 @@ class DQNAgent:
         self.buffer = ReplayBuffer(buffer_cap)
         self.loss_fn = nn.SmoothL1Loss()
 
-        # History tracking for step-by-step interaction
-        self.history = deque(maxlen=self.seq_len)
-        self.last_action = 0
+        if self.is_recurrent:
+            self.history = deque(maxlen=self.seq_len)
+            self.last_action = 0
 
     def _get_one_hot_action(self, action: int) -> np.ndarray:
         oh = np.zeros(self.action_size, dtype=np.float32)
@@ -125,7 +157,6 @@ class DQNAgent:
         return np.concatenate([state, oh_action])
 
     def _get_padded_history(self) -> np.ndarray:
-        """Returns the current history padded to seq_len."""
         history_list = list(self.history)
         if len(history_list) < self.seq_len:
             padding = [np.zeros(self.state_size + self.action_size, dtype=np.float32)] * (self.seq_len - len(history_list))
@@ -133,64 +164,46 @@ class DQNAgent:
         return np.array(history_list)
 
     def reset_history(self):
-        """Should be called at the start of each episode."""
-        self.history.clear()
-        self.last_action = 0
+        if self.is_recurrent:
+            self.history.clear()
+            self.last_action = 0
 
     def select_action(self, state: np.ndarray, training: bool = True) -> int:
-        # 1. Combine state and previous action
-        combined = self._get_combined_input(state, self.last_action)
-        self.history.append(combined)
+        if self.is_recurrent:
+            combined = self._get_combined_input(state, self.last_action)
+            self.history.append(combined)
         
-        # 2. ε-greedy
         if training and random.random() < self.epsilon:
             action = random.randrange(self.action_size)
         else:
             with torch.no_grad():
-                seq = self._get_padded_history()
-                s_tensor = torch.FloatTensor(seq).unsqueeze(0).to(self.device)
-                action = self.q_net(s_tensor).argmax(dim=1).item()
+                if self.is_recurrent:
+                    seq = self._get_padded_history()
+                    inp = torch.FloatTensor(seq).unsqueeze(0).to(self.device)
+                else:
+                    inp = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+                action = self.q_net(inp).argmax(dim=1).item()
         
-        self.last_action = action
+        if self.is_recurrent:
+            self.last_action = action
         return action
 
     def store(self, state, action, reward, next_state, done):
-        """
-        The store method now needs to know the history context.
-        To keep it compatible with train.py, we derive the history here.
-        Wait: the 'state' passed to train.py is the environment state.
-        We need to store the SEQuENCE in the buffer.
-        """
-        # Get history before appending current state-action
-        # Actually, state already contains history because select_action was called.
-        # But wait, train.py does:
-        # action = agent.select_action(state)
-        # next_state, reward, done, info = env.step(action)
-        # agent.store(state, action, reward, next_state, done)
-        
-        # This is slightly tricky because the agent's internal history was updated in select_action.
-        # Let's recreate the sequence here.
-        
-        # Current sequence leading to 'action'
+        if not self.is_recurrent:
+            self.buffer.push(state, action, reward, next_state, float(done))
+            return
+
         curr_seq = self._get_padded_history()
-        
-        # Predicted 'next' sequence
-        # To get next_seq, we'd need to know what a_{t} was and the next_state.
-        # That is exactly what we have now.
         next_combined = self._get_combined_input(next_state, action)
-        
-        # Temporary next history
         next_history_list = list(self.history) + [next_combined]
         if len(next_history_list) > self.seq_len:
             next_history_list = next_history_list[1:]
-        
-        # Pad if necessary
+
         if len(next_history_list) < self.seq_len:
             padding = [np.zeros(self.state_size + self.action_size, dtype=np.float32)] * (self.seq_len - len(next_history_list))
             next_seq = np.array(padding + next_history_list)
         else:
             next_seq = np.array(next_history_list)
-
         self.buffer.push(curr_seq, action, reward, next_seq, float(done))
 
     def update(self):
@@ -198,7 +211,7 @@ class DQNAgent:
             return None
 
         states, actions, rewards, next_states, dones = self.buffer.sample(self.batch_size)
-        states      = states.to(self.device)     # (batch, seq_len, input_size)
+        states      = states.to(self.device)
         actions     = actions.to(self.device)
         rewards     = rewards.to(self.device)
         next_states = next_states.to(self.device)
@@ -236,6 +249,7 @@ class DQNAgent:
             "optimizer":    self.optimizer.state_dict(),
             "epsilon":      self.epsilon,
             "update_count": self._update_count,
+            "model_type":   self.model_type
         }, path)
         print(f"  [ckpt saved] {path}")
 

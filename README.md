@@ -9,16 +9,18 @@ A Reinforcement Learning project focused on optimizing traffic light signal cont
 ```text
 📦 RL-in-traffic
  ┣ 📂 agent
- ┃ ┗ 📜 dqn_agent.py      # Core DQN implementation (Model, Agent, Replay Buffer)
+ ┃ ┗ 📜 dqn_agent.py      # DQN implementation (MLP or RNN types)
  ┣ 📂 env
- ┃ ┗ 📜 traffic_env.py    # SUMO environment wrapper specialized for RL
+ ┃ ┗ 📜 traffic_env.py    # SUMO environment wrapper (State/Action/Reward)
+ ┣ 📂 logs
+ ┃ ┗ 📜 eval_steps_...csv # Automated CSV logs from evaluation runs
  ┣ 📂 utils
  ┃ ┣ 📜 plots.py          # Centralized plotting & visualization helpers
  ┃ ┗ 📜 __init__.py
- ┣ 📜 config.py           # Unified project configuration and hyper-parameters
- ┣ 📜 train.py            # Main training script with scenario cycling
- ┣ 📜 evaluate.py         # Performance benchmarking (RL vs. Static Controller)
- ┣ 📜 play.py             # Visual replay of trained agents in SUMO-GUI
+ ┣ 📜 config.py           # Hyper-parameters and architecture selection
+ ┣ 📜 train.py            # Main training script (with scenario cycling)
+ ┣ 📜 evaluate.py         # Performance benchmarking (RL vs. Static)
+ ┣ 📜 play.py             # Visual replay in SUMO-GUI
  ┣ 📜 requirements.txt    # Python dependencies
  ┗ 📜 README.md           # Project documentation
 ```
@@ -27,31 +29,32 @@ A Reinforcement Learning project focused on optimizing traffic light signal cont
 
 ## 🚦 System Logic & Architecture
 
-### 1. State Representation
-The agent observes a **10-dimensional state vector** every decision step:
-- **Queue Lengths (4-dim)**: Normalized number of halted vehicles for each lane group.
-- **Wait Times (4-dim)**: Normalized lead-vehicle waiting time for each lane group.
-- **Active Phase (1-dim)**: Index of the current green phase.
-- **Phase Duration (1-dim)**: Elapsed time in the current phase (normalized).
+### 1. Neural Architectures
+The project supports two model types, configurable in `config.py` (**`MODEL_TYPE`**):
+- **MLP (Default)**: Standard feedforward network using the current state.
+- **RNN (LSTM)**: Recurrent network that utilizes a history of states and actions for sequence-aware decision making.
 
-### 2. Action Space
-The agent chooses from 4 possible actions every $T=10$ simulation seconds:
-- `0`: **STAY** (Maintain current green phase)
-- `1`: **FORWARD** (Transition to next circular phase)
-- `2`: **DIAGONAL** (Transition to opposite circular phase)
-- `3`: **BACKWARD** (Transition to previous circular phase)
+### 2. State Representation
+The agent observes a **6-dimensional state vector**:
+- **Queue Lengths (4-dim)**: Normalized sum of halting and pending vehicles for each lane group (N-S, E-W, N-S Left, E-W Left).
+- **Active Phase (1-dim)**: Index of the current green phase (0-3).
+- **Phase Duration (1-dim)**: Elapsed time in the current phase, normalized by 60s (capped at 1.0).
 
-### 3. Reward Function
-Multi-objective reward shaping designed to balance queue reduction and wait-time minimization:
-- **Wait Time**: Penalizes cumulative seconds vehicles are stationary.
-- **Queue Count**: Penalizes the existence of halting vehicles.
-- **Harmonic Mode**: (Default for training) Combines these metrics using an exponential surcharge to prevent extremely long delays (starvation).
+### 3. Action Space
+The agent chooses from **2 possible actions** at each decision point:
+- `0`: **STAY** (Remain in the current green phase)
+- `1`: **NEXT** (Switch to the next circular green phase via a yellow transition)
+
+### 4. Reward Function
+The environment uses a **Quadratic Penalty** based on congestion:
+- **Congestion Penalty**: Calculated as the negative sum of the squares of halting vehicles across all lanes ($R = -\sum \text{halt}^2$).
+- **Switching Penalty**: A fixed negative reward is applied when switching phases to discourage excessive jitter.
 
 ---
 
 ## 🌪 Environment Scenarios
 
-The system uses **Bernoulli Spawning** to generate traffic. You can train or evaluate across several traffic patterns:
+Traffic flows are generated using **Bernoulli Spawning**. The following scenarios are supported:
 
 | Scenario | Distribution | Use Case |
 | :--- | :--- | :--- |
@@ -64,9 +67,9 @@ The system uses **Bernoulli Spawning** to generate traffic. You can train or eva
 
 ## 🛠 Setup & Installation
 
-1. **Install SUMO**: Download and install from [the official SUMO page](https://sumo.dlr.de/docs/Downloads.php).
-2. **Environment Variable**: Ensure `SUMO_HOME` is set to your SUMO installation directory.
-3. **Python Dependencies**:
+1. **Install SUMO**: [Official SUMO Downloads](https://sumo.dlr.de/docs/Downloads.php).
+2. **Set `SUMO_HOME`**: Point this environment variable to your SUMO installation folder.
+3. **Install Repo Requirements**:
    ```bash
    pip install -r requirements.txt
    ```
@@ -75,24 +78,20 @@ The system uses **Bernoulli Spawning** to generate traffic. You can train or eva
 
 ## 🚀 Getting Started
 
-### 🏋️ Training the Agent
-Train the DQN agent with scenario cycling (randomizing traffic patterns each episode).
+### 🏋️ Training
 ```bash
-# Default training
-python train.py
-
-# Custom episodes and spawn probability
-python train.py --episodes 500 --prob 0.08
+python train.py --episodes 200 --prob 0.05
 ```
 
-### 📊 Evaluating Performance
-Compare your trained model (`checkpoints/dqn_best.pt`) against a standard static-timed controller.
+### 📊 Evaluation & Logging
+Benchmarks the RL agent against a static controller.
 ```bash
-python evaluate.py --runs 5 --scenario alternate
+python evaluate.py --runs 1 --scenario uniform
 ```
+> [!NOTE]
+> Evaluation automatically saves step-by-step data (States, Actions, Timestamps) to the `/logs` directory for deep analysis.
 
 ### 📺 Visual Replay
-Watch the agent in action using the SUMO-GUI.
 ```bash
 python play.py --model checkpoints/dqn_best.pt
 ```
@@ -100,10 +99,6 @@ python play.py --model checkpoints/dqn_best.pt
 ---
 
 ## 📈 Visualizations
-- **Training Plots**: Rewards and losses are saved as `results_TIMESTAMP.png`.
-- **Comparison Plots**: Benchmark results are saved as `evaluation_results.png`.
-
----
-
-> [!TIP]
-> Use the `--gui` flag in `train.py` or `evaluate.py` to watch the simulation in real-time, although it will significantly slow down the process.
+- **Training Plots**: Episode rewards/losses saved as `results_TIMESTAMP.png`.
+- **Comparison Plots**: Performance comparison saved as `evaluation_results.png`.
+- **CSV Logs**: Raw step data saved in `/logs/eval_steps_...csv`.

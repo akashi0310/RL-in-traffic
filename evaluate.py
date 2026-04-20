@@ -3,6 +3,8 @@ import argparse
 import time
 import subprocess
 import numpy as np
+import csv
+
 
 import config
 from env.traffic_env import TrafficEnv, compute_reward
@@ -27,14 +29,35 @@ def run_rl(model_path: str, use_gui: bool, num_runs: int,
     rewards = []
     stats = {"departed": [], "arrived": []}
     
+    # Track state and action history for CSV logging
+    history = []
+    
     for run in range(1, num_runs + 1):
         state = env.reset()
         agent.reset_history()
         total_reward = 0.0
+        step_idx = 0
         while True:
             action = agent.select_action(state, training=False)
+            
+            # Store normalized state and chosen action
+            history.append({
+                "run": run,
+                "step": step_idx,
+                "sim_time": traci.simulation.getTime(),
+                "q0": f"{state[0]:.4f}",
+                "q1": f"{state[1]:.4f}",
+                "q2": f"{state[2]:.4f}",
+                "q3": f"{state[3]:.4f}",
+                "phase": int(state[4]),
+                "time_norm": f"{state[5]:.4f}",
+                "action": int(action)
+            })
+
             state, reward, done, info = env.step(action)
             total_reward += reward * config.REWARD_SCALE
+            step_idx += 1
+            
             if done:
                 stats["departed"].append(info.get("cum_departed", 0))
                 stats["arrived"].append(info.get("cum_arrived", 0))
@@ -42,7 +65,20 @@ def run_rl(model_path: str, use_gui: bool, num_runs: int,
         rewards.append(total_reward)
         print(f"  Run {run}: reward = {total_reward:.1f}, passing = {stats['arrived'][-1]}/{stats['departed'][-1]}")
 
+    # Save to CSV in logs directory
+    if history:
+        os.makedirs(config.LOGS_DIR, exist_ok=True)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        csv_path = os.path.join(config.LOGS_DIR, f"eval_steps_{scenario}_{timestamp}.csv")
+        
+        with open(csv_path, mode='w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=history[0].keys())
+            writer.writeheader()
+            writer.writerows(history)
+        print(f"  History saved to: {csv_path}")
+
     return rewards, stats
+
 
 
 def run_static(use_gui: bool, num_runs: int,

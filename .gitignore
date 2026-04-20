@@ -1,4 +1,5 @@
 checkpoints/
+logs/
 *.png
 
 # Byte-compiled / optimized / DLL files
