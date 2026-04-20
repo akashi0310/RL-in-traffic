@@ -10,7 +10,7 @@ from utils.plots import plot_training
 
 
 def train(num_episodes: int = 100, use_gui: bool = False, resume: str = None,
-          bernoulli_p: float = 0.05, reward_mode: str = "harmonic",
+          bernoulli_p: float = 0.05,
           scenario: str = None, use_ddqn: bool = config.USE_DDQN):
     
     os.makedirs(config.CHECKPOINT_DIR, exist_ok=True)
@@ -19,7 +19,7 @@ def train(num_episodes: int = 100, use_gui: bool = False, resume: str = None,
     scenario_cycle = (TrafficEnv.SCENARIOS if scenario is None else (scenario,))
     
     env = TrafficEnv(use_gui=use_gui, bernoulli_p=bernoulli_p, 
-                     reward_mode=reward_mode, scenario=scenario_cycle[0])
+                     scenario=scenario_cycle[0])
     agent = DQNAgent(state_size=env.state_size, action_size=env.action_size, use_double=use_ddqn)
 
     if resume and os.path.isfile(resume):
@@ -55,6 +55,7 @@ def train(num_episodes: int = 100, use_gui: bool = False, resume: str = None,
         for ep in range(1, num_episodes + 1):
             env.set_scenario(scenario_cycle[(ep - 1) % len(scenario_cycle)])
             state = env.reset()
+            agent.reset_history()
             total_reward = 0.0
             ep_wait = 0.0
             ep_count = 0.0
@@ -155,9 +156,6 @@ if __name__ == "__main__":
                         help="Path to checkpoint to resume from")
     parser.add_argument("--prob", type=float, default=0.05,
                         help="Bernoulli spawn probability")
-    parser.add_argument("--reward-mode", type=str, default="harmonic", 
-                        choices=["wait", "count", "harmonic"],
-                        help="Reward metric")
     parser.add_argument("--scenario", type=str, default=None,
                         choices=list(TrafficEnv.SCENARIOS),
                         help="Pin training to a single scenario")
@@ -166,5 +164,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     train(num_episodes=args.episodes, use_gui=args.gui, resume=args.resume,
-          bernoulli_p=args.prob, reward_mode=args.reward_mode,
+          bernoulli_p=args.prob,
           scenario=args.scenario, use_ddqn=args.ddqn)

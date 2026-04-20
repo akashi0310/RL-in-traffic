@@ -16,17 +16,18 @@ import traci
 
 
 def run_rl(model_path: str, use_gui: bool, num_runs: int,
-           bernoulli_p: float = 0.05, reward_mode: str = "count",
+           bernoulli_p: float = 0.05,
            scenario: str = "uniform"):
     print(f"\n--- RL Agent ({num_runs} run(s), scenario={scenario}) ---")
     env = TrafficEnv(use_gui=use_gui, bernoulli_p=bernoulli_p, 
-                     reward_mode=reward_mode, eval_mode=True, scenario=scenario)
+                     eval_mode=True, scenario=scenario, max_steps=config.EVAL_STEPS)
     agent = DQNAgent(state_size=env.state_size, action_size=env.action_size)
     agent.load(model_path)
 
     rewards = []
     for run in range(1, num_runs + 1):
         state = env.reset()
+        agent.reset_history()
         total_reward = 0.0
         while True:
             action = agent.select_action(state, training=False)
@@ -41,7 +42,7 @@ def run_rl(model_path: str, use_gui: bool, num_runs: int,
 
 
 def run_static(use_gui: bool, num_runs: int,
-               bernoulli_p: float = 0.05, reward_mode: str = "count",
+               bernoulli_p: float = 0.05,
                scenario: str = "uniform"):
     """
     Evaluates the default SUMO controller (static) using the same reward logic.
@@ -49,7 +50,7 @@ def run_static(use_gui: bool, num_runs: int,
     print(f"\n--- Static Controller ({num_runs} run(s), scenario={scenario}) ---")
     
     # We use a temporary env just to generate the route file once
-    gen_env = TrafficEnv(bernoulli_p=bernoulli_p, scenario=scenario)
+    gen_env = TrafficEnv(bernoulli_p=bernoulli_p, scenario=scenario, max_steps=config.EVAL_STEPS)
     sumo_cfg_abs = gen_env.sumo_cfg
     sumo_dir = gen_env.sumo_dir
     from env.traffic_env import BERNOULLI_ROUTE_FILE
@@ -83,20 +84,11 @@ def run_static(use_gui: bool, num_runs: int,
         traci.init(port)
 
         total_reward = 0.0
-        # Main simulation period
-        for _ in range(config.MAX_STEPS):
-            for _ in range(config.STEP_SIZE):
-                traci.simulationStep()
-            
-            step_reward = compute_reward(lanes, left_lanes, mode=reward_mode)
-            total_reward += step_reward * config.REWARD_SCALE
-
-        # Drain phase
-        drain_cap = 200 * config.STEP_SIZE
-        drained = 0
-        while traci.simulation.getMinExpectedNumber() > 0 and drained < drain_cap:
+        # Run until the fixed evaluation duration is reached
+        while traci.simulation.getTime() < config.EVAL_DURATION:
             traci.simulationStep()
-            drained += 1
+            step_reward = compute_reward(lanes, left_lanes)
+            total_reward += step_reward * config.REWARD_SCALE
 
         traci.close()
         proc.wait(timeout=10)
@@ -116,9 +108,6 @@ if __name__ == "__main__":
     parser.add_argument("--gui", action="store_true", help="Use SUMO-GUI")
     parser.add_argument("--prob", type=float, default=0.04,
                         help="Bernoulli spawn probability")
-    parser.add_argument("--reward-mode", type=str, default="count", 
-                        choices=["wait", "count", "harmonic"],
-                        help="Reward metric for evaluation")
     parser.add_argument("--scenario", type=str, default="uniform",
                         choices=list(TrafficEnv.SCENARIOS),
                         help="Traffic scenario")
@@ -135,11 +124,11 @@ if __name__ == "__main__":
     print(f"{'='*60}")
 
     rl_rewards = run_rl(args.model, args.gui, args.runs,
-                        bernoulli_p=args.prob, reward_mode=args.reward_mode,
+                        bernoulli_p=args.prob,
                         scenario=args.scenario)
     
     static_rewards = run_static(args.gui, args.runs,
-                                bernoulli_p=args.prob, reward_mode=args.reward_mode,
+                                bernoulli_p=args.prob,
                                 scenario=args.scenario)
 
     rl_avg = np.mean(rl_rewards)

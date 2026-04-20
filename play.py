@@ -22,6 +22,7 @@ def play(model_path: str, bernoulli_p: float = 0.05):
     print(f"{'='*62}\n")
 
     state = env.reset()
+    agent.reset_history()
     total_reward = 0.0
     step = 0
 

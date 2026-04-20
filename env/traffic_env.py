@@ -9,9 +9,8 @@ SUMO Traffic Signal Control Environment (TraCI-based).
   Phase 2 : N2C_2, S2C_2                 (N-S left turn)
   Phase 3 : E2C_2, W2C_2                 (E-W left turn)
 
-State (10-dim float32):
+State (6-dim float32):
   [queue_g0, queue_g1, queue_g2, queue_g3,         <- summed halting vehicles per group / 25
-   wait_g0,  wait_g1,  wait_g2,  wait_g3,          <- max lead-vehicle waiting time per group / WAIT_TIME_LIMIT
    current_green_phase,                            <- 0..3
    phase_time_norm]                                <- seconds / 60
 
@@ -50,83 +49,27 @@ except ImportError as e:
 BERNOULLI_ROUTE_FILE = "bernoulli.rou.xml"
 COUNT_REWARD_UPPER_BOUND = 10
 WAIT_REWARD_UPPER_BOUND = 15
-WAIT_TIME_LIMIT = 60
+WAIT_TIME_LIMIT = 100
 
-_LANE_RED_TIMES = {}
-_LAST_SIM_TIME = -1
-_CONTROLLED_LANES_CACHE = None
-
-def compute_reward(lanes: list, left_lanes: list, mode: str = "wait", return_components: bool = False) -> float | tuple[float, float, float]:
+def compute_reward(lanes: list, left_lanes: list, return_components: bool = False) -> float | tuple[float, float, float]:
     """
-    Standardized reward function shared between Environment and Evaluation.
-    Now uses consecutive red time of the lane phase instead of individual vehicle wait times.
+    Standardized reward function based on the square of halting vehicles.
     """
-    global _LANE_RED_TIMES, _LAST_SIM_TIME, _CONTROLLED_LANES_CACHE
     reward = 0.0
-    wait_part_total = 0.0
     count_part_total = 0.0
 
-    # Track consecutive red time per lane across calls
-    try:
-        curr_time = traci.simulation.getTime()
-        if curr_time < _LAST_SIM_TIME:
-            _LANE_RED_TIMES = {}
-        
-        dt = max(0, curr_time - _LAST_SIM_TIME) if _LAST_SIM_TIME != -1 else 0
-        _LAST_SIM_TIME = curr_time
-        
-        tls_id = "center"
-        if _CONTROLLED_LANES_CACHE is None:
-            _CONTROLLED_LANES_CACHE = traci.trafficlight.getControlledLanes(tls_id)
-        
-        state = traci.trafficlight.getRedYellowGreenState(tls_id)
-        for i, l_id in enumerate(_CONTROLLED_LANES_CACHE):
-            if l_id not in _LANE_RED_TIMES:
-                _LANE_RED_TIMES[l_id] = 0.0
-            
-            if state[i] in 'rR':
-                _LANE_RED_TIMES[l_id] += dt
-            else:
-                _LANE_RED_TIMES[l_id] = 0.0
-    except Exception:
-        # Fallback for cases where TraCI/TLS is not ready
-        pass
-
     for l in lanes:
-        wait_val = 0.0
-        count_val = 0.0
-
         pending_count = len(traci.lane.getPendingVehicles(l))
         halting_count = traci.lane.getLastStepHaltingNumber(l) + pending_count
-
-        if mode == "harmonic" or mode == "wait":
-            veh_ids = traci.lane.getLastStepVehicleIDs(l)
-            lead_wait = 0.0
-            # Use the tracked consecutive red time if vehicles are present
-            if veh_ids:
-                lead_wait = _LANE_RED_TIMES.get(l, 0.0)
-
-            if mode == "harmonic":
-                wait_val = WAIT_REWARD_UPPER_BOUND / (1 + np.exp(-0.05 * (lead_wait - WAIT_TIME_LIMIT)))
-                count_val = COUNT_REWARD_UPPER_BOUND * (1 - np.exp(-0.1 * halting_count))
-            else:
-                wait_val = lead_wait
-                # Add a linear penalty for pending vehicles in "wait" mode 
-                # to ensure total penalty keeps raising when lane is full
-                count_val = pending_count 
-        else:  # "count"
-            count_val = halting_count ** 2
-
-        penalty = 1
+        count_val = (halting_count)** 2
         
-        reward -= (wait_val + count_val) * penalty
-        wait_part_total -= wait_val * penalty
-        count_part_total -= count_val * penalty
+        reward -= count_val
+        count_part_total -= count_val
 
     reward = -np.sqrt(max(0, -reward))
 
     if return_components:
-        return reward, wait_part_total, count_part_total
+        return reward, 0.0, count_part_total
     return reward
 
 
@@ -145,9 +88,9 @@ class TrafficEnv:
     SCENARIOS = ("uniform", "horizontal", "vertical", "alternate")
 
     def __init__(self, sumo_cfg: str | None = None, use_gui: bool = False, port: int = 8813,
-                 bernoulli_p: float = 0.05, reward_mode: str = "wait",
+                 bernoulli_p: float = 0.05,
                  eval_mode: bool = False, drain_step_cap: int = 200,
-                 scenario: str = "uniform"):
+                 scenario: str = "uniform", max_steps: int = config.MAX_STEPS):
         """
         SUMO Traffic Signal Control Environment.
         """
@@ -156,9 +99,10 @@ class TrafficEnv:
         self.use_gui = use_gui
         self.port = port
         self.bernoulli_p = bernoulli_p
-        self.reward_mode = reward_mode
         self.eval_mode = eval_mode
         self.drain_step_cap = drain_step_cap
+        self.max_steps = max_steps
+        self.min_green = config.MIN_GREEN
         
         if scenario not in self.SCENARIOS:
             raise ValueError(f"scenario must be one of {self.SCENARIOS}, got {scenario!r}")
@@ -171,7 +115,7 @@ class TrafficEnv:
 
     @property
     def state_size(self) -> int:
-        return self.NUM_PHASES * 2 + 2
+        return self.NUM_PHASES + 2
 
     @property
     def action_size(self) -> int:
@@ -229,7 +173,7 @@ class TrafficEnv:
         traci.trafficlight.setPhaseDuration(self.TL_ID, 999_999)
 
     def _scenario_segments(self):
-        end_time = config.MAX_STEPS * config.STEP_SIZE
+        end_time = self.max_steps * config.STEP_SIZE
         hi = self.bernoulli_p
         lo = self.bernoulli_p / 2.0
 
@@ -293,22 +237,13 @@ class TrafficEnv:
         self.scenario = scenario
 
     def _get_state(self) -> np.ndarray:
-        queues, waits = [], []
+        queues = []
         for group in self.LANE_GROUPS:
             # Include pending (backlogged) vehicles in the queue state
             halt = sum(traci.lane.getLastStepHaltingNumber(l) + len(traci.lane.getPendingVehicles(l)) for l in group)
-            max_lead_wait = 0.0
-            for l in group:
-                veh_ids = traci.lane.getLastStepVehicleIDs(l)
-                if veh_ids:
-                    lead = max(veh_ids, key=lambda v: traci.vehicle.getLanePosition(v))
-                    lead_wait = traci.vehicle.getWaitingTime(lead)
-                    if lead_wait > max_lead_wait:
-                        max_lead_wait = lead_wait
             queues.append(halt / 25.0)
-            waits.append(min(max_lead_wait / WAIT_TIME_LIMIT, 1.0))
         return np.array(
-            queues + waits + [self._green_idx, min(self._phase_time / 60.0, 1.0)],
+            queues + [self._green_idx, min(self._phase_time / 60.0, 1.0)],
             dtype=np.float32,
         )
 
@@ -326,7 +261,9 @@ class TrafficEnv:
 
     def step(self, action: int):
         # Action: 0=STAY, 1=NEXT
-        if action == 1 and self._phase_time >= config.MIN_GREEN:
+        switch_occurred = False
+        if action == 1 and self._phase_time >= self.min_green:
+            switch_occurred = True
             # Transition via yellow
             yellow = self.GREEN_PHASES[self._green_idx] + 1
             self._set_phase(yellow)
@@ -336,25 +273,30 @@ class TrafficEnv:
             self._green_idx = (self._green_idx + 1) % self.NUM_PHASES
             self._set_phase(self.GREEN_PHASES[self._green_idx])
             self._phase_time = 0.0
+        elif action == 1:
+            # Revert to STAY if MIN_GREEN not met
+            action = 0
 
         for _ in range(config.STEP_SIZE):
             traci.simulationStep()
 
         # Calculate reward and its components
         reward, wait_sum, count_sum = compute_reward(
-            self.ALL_LANES, self.LEFT_LANES, mode=self.reward_mode, return_components=True
+            self.ALL_LANES, self.LEFT_LANES, return_components=True
         )
+
+        # Apply switching penalty to "let the agent know" that switching is costly
+        if switch_occurred:
+            reward -= config.SWITCH_PENALTY
 
         self._phase_time += config.STEP_SIZE
         self._step += 1
 
+        curr_time = traci.simulation.getTime()
         if self.eval_mode:
-            past_spawn = self._step >= config.MAX_STEPS
-            cleared = past_spawn and traci.simulation.getMinExpectedNumber() == 0
-            hit_cap = self._step >= config.MAX_STEPS + self.drain_step_cap
-            done = cleared or hit_cap
+            done = curr_time >= config.EVAL_DURATION
         else:
-            done = self._step >= config.MAX_STEPS
+            done = self._step >= self.max_steps
 
         if done:
             self._close()
