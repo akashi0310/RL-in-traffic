@@ -112,6 +112,8 @@ class TrafficEnv:
         self._step = 0
         self._phase_time = 0.0
         self._green_idx = 0
+        self._cum_departed = 0
+        self._cum_arrived = 0
 
     @property
     def state_size(self) -> int:
@@ -269,6 +271,8 @@ class TrafficEnv:
             self._set_phase(yellow)
             for _ in range(config.YELLOW_DURATION):
                 traci.simulationStep()
+                self._cum_departed += traci.simulation.getDepartedNumber()
+                self._cum_arrived += traci.simulation.getArrivedNumber()
 
             self._green_idx = (self._green_idx + 1) % self.NUM_PHASES
             self._set_phase(self.GREEN_PHASES[self._green_idx])
@@ -279,6 +283,8 @@ class TrafficEnv:
 
         for _ in range(config.STEP_SIZE):
             traci.simulationStep()
+            self._cum_departed += traci.simulation.getDepartedNumber()
+            self._cum_arrived += traci.simulation.getArrivedNumber()
 
         # Calculate reward and its components
         reward, wait_sum, count_sum = compute_reward(
@@ -299,8 +305,12 @@ class TrafficEnv:
             done = self._step >= self.max_steps
 
         if done:
+            info = {
+                "cum_departed": self._cum_departed,
+                "cum_arrived": self._cum_arrived
+            }
             self._close()
-            return np.zeros(self.state_size, dtype=np.float32), reward, True, {}
+            return np.zeros(self.state_size, dtype=np.float32), reward, True, info
 
         return self._get_state(), reward, False, {
             "step": self._step,
@@ -308,6 +318,8 @@ class TrafficEnv:
             "phase_time": self._phase_time,
             "wait_part": wait_sum,
             "count_part": count_sum,
+            "cum_departed": self._cum_departed,
+            "cum_arrived": self._cum_arrived,
         }
 
     def close(self):

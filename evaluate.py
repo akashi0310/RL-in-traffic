@@ -25,20 +25,24 @@ def run_rl(model_path: str, use_gui: bool, num_runs: int,
     agent.load(model_path)
 
     rewards = []
+    stats = {"departed": [], "arrived": []}
+    
     for run in range(1, num_runs + 1):
         state = env.reset()
         agent.reset_history()
         total_reward = 0.0
         while True:
             action = agent.select_action(state, training=False)
-            state, reward, done, _ = env.step(action)
+            state, reward, done, info = env.step(action)
             total_reward += reward * config.REWARD_SCALE
             if done:
+                stats["departed"].append(info.get("cum_departed", 0))
+                stats["arrived"].append(info.get("cum_arrived", 0))
                 break
         rewards.append(total_reward)
-        print(f"  Run {run}: reward = {total_reward:.1f}")
+        print(f"  Run {run}: reward = {total_reward:.1f}, passing = {stats['arrived'][-1]}/{stats['departed'][-1]}")
 
-    return rewards
+    return rewards, stats
 
 
 def run_static(use_gui: bool, num_runs: int,
@@ -49,7 +53,6 @@ def run_static(use_gui: bool, num_runs: int,
     """
     print(f"\n--- Static Controller ({num_runs} run(s), scenario={scenario}) ---")
     
-    # We use a temporary env just to generate the route file once
     gen_env = TrafficEnv(bernoulli_p=bernoulli_p, scenario=scenario, max_steps=config.EVAL_STEPS)
     sumo_cfg_abs = gen_env.sumo_cfg
     sumo_dir = gen_env.sumo_dir
@@ -61,6 +64,8 @@ def run_static(use_gui: bool, num_runs: int,
     left_lanes = TrafficEnv.LEFT_LANES
 
     rewards = []
+    stats = {"departed": [], "arrived": []}
+    
     for run in range(1, num_runs + 1):
         gen_env._generate_bernoulli_routes()
 
@@ -84,9 +89,14 @@ def run_static(use_gui: bool, num_runs: int,
         traci.init(port)
 
         total_reward = 0.0
-        # Run until the fixed evaluation duration is reached
+        cum_dep = 0
+        cum_arr = 0
+        
         while traci.simulation.getTime() < config.EVAL_DURATION:
             traci.simulationStep()
+            cum_dep += traci.simulation.getDepartedNumber()
+            cum_arr += traci.simulation.getArrivedNumber()
+            
             step_reward = compute_reward(lanes, left_lanes)
             total_reward += step_reward * config.REWARD_SCALE
 
@@ -94,9 +104,11 @@ def run_static(use_gui: bool, num_runs: int,
         proc.wait(timeout=10)
 
         rewards.append(total_reward)
-        print(f"  Run {run}: reward = {total_reward:.1f}")
+        stats["departed"].append(cum_dep)
+        stats["arrived"].append(cum_arr)
+        print(f"  Run {run}: reward = {total_reward:.1f}, passing = {cum_arr}/{cum_dep}")
 
-    return rewards
+    return rewards, stats
 
 
 if __name__ == "__main__":
@@ -123,23 +135,27 @@ if __name__ == "__main__":
     print(f"  Runs       : {args.runs}")
     print(f"{'='*60}")
 
-    rl_rewards = run_rl(args.model, args.gui, args.runs,
-                        bernoulli_p=args.prob,
-                        scenario=args.scenario)
+    rl_rewards, rl_stats = run_rl(args.model, args.gui, args.runs,
+                                  bernoulli_p=args.prob,
+                                  scenario=args.scenario)
     
-    static_rewards = run_static(args.gui, args.runs,
-                                bernoulli_p=args.prob,
-                                scenario=args.scenario)
+    static_rewards, static_stats = run_static(args.gui, args.runs,
+                                              bernoulli_p=args.prob,
+                                              scenario=args.scenario)
 
     rl_avg = np.mean(rl_rewards)
     static_avg = np.mean(static_rewards)
     improvement = ((rl_avg - static_avg) / abs(static_avg) * 100
                    if static_avg != 0 else 0)
 
+    # Throughput ratios
+    rl_ratio = np.mean(rl_stats["departed"]) / np.mean(rl_stats["arrived"]) if np.mean(rl_stats["arrived"]) != 0 else 0
+    static_ratio = np.mean(static_stats["departed"]) / np.mean(static_stats["arrived"]) if np.mean(static_stats["arrived"]) != 0 else 0
+
     print(f"\n{'='*60}")
     print(f"  SUMMARY RESULTS")
-    print(f"  RL Agent    : {rl_avg:>8.1f} +/- {np.std(rl_rewards):.1f}")
-    print(f"  Static Ctrl : {static_avg:>8.1f} +/- {np.std(static_rewards):.1f}")
+    print(f"  RL Agent    : Reward={rl_avg:>8.1f} | Ratio={rl_ratio:.3f} (Injected/Completed)")
+    print(f"  Static Ctrl : Reward={static_avg:>8.1f} | Ratio={static_ratio:.3f} (Injected/Completed)")
     print(f"  Improvement : {improvement:>+8.1f}%")
     print(f"{'='*60}\n")
 
