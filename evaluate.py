@@ -38,23 +38,28 @@ def run_rl(model_path: str, use_gui: bool, num_runs: int,
         total_reward = 0.0
         step_idx = 0
         while True:
+            # Store state and time before taking action
+            current_state = state
+            current_sim_time = traci.simulation.getTime()
+            
             action = agent.select_action(state, training=False)
             
-            # Store normalized state and chosen action
+            state, reward, done, info = env.step(action)
+            
             history.append({
                 "run": run,
                 "step": step_idx,
-                "sim_time": traci.simulation.getTime(),
-                "q0": f"{state[0]:.4f}",
-                "q1": f"{state[1]:.4f}",
-                "q2": f"{state[2]:.4f}",
-                "q3": f"{state[3]:.4f}",
-                "phase": int(state[4]),
-                "time_norm": f"{state[5]:.4f}",
-                "action": int(action)
+                "sim_time": current_sim_time,
+                "q0": f"{current_state[0]:.4f}",
+                "q1": f"{current_state[1]:.4f}",
+                "q2": f"{current_state[2]:.4f}",
+                "q3": f"{current_state[3]:.4f}",
+                "phase": int(current_state[4]),
+                "time_norm": f"{current_state[5]:.4f}",
+                "action": int(action),
+                "reward": f"{reward:.4f}"
             })
 
-            state, reward, done, info = env.step(action)
             total_reward += reward * config.REWARD_SCALE
             step_idx += 1
             
@@ -128,12 +133,21 @@ def run_static(use_gui: bool, num_runs: int,
         cum_dep = 0
         cum_arr = 0
         
+        # Initialize prev count for reward modes like 'delta'
+        prev_halt_count = sum(traci.lane.getLastStepHaltingNumber(l) + len(traci.lane.getPendingVehicles(l)) for l in lanes)
+
         while traci.simulation.getTime() < config.EVAL_DURATION:
             traci.simulationStep()
             cum_dep += traci.simulation.getDepartedNumber()
             cum_arr += traci.simulation.getArrivedNumber()
             
-            step_reward = compute_reward(lanes, left_lanes)
+            # Use current config for reward mode
+            step_reward, _, _, current_halt = compute_reward(
+                lanes, left_lanes, mode=config.REWARD_MODE,
+                prev_halt_count=prev_halt_count, return_components=True
+            )
+            prev_halt_count = current_halt
+            
             total_reward += step_reward * config.REWARD_SCALE
 
         traci.close()

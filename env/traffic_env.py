@@ -48,25 +48,33 @@ except ImportError as e:
 
 BERNOULLI_ROUTE_FILE = "bernoulli.rou.xml"
 
-def compute_reward(lanes: list, left_lanes: list, return_components: bool = False) -> float | tuple[float, float, float]:
+def compute_reward(lanes: list, left_lanes: list, mode: str = "square", prev_halt_count: float = 0.0, return_components: bool = False) -> float | tuple[float, float, float, float]:
     """
-    Standardized reward function based on the square of halting vehicles.
+    Standardized reward function.
+    Modes:
+      - "square": sum of squared halting vehicles (negative).
+      - "delta": prev_halt_count - current_halt_count.
     """
     reward = 0.0
     count_part_total = 0.0
+    current_halt_count = 0.0
 
     for l in lanes:
         pending_count = len(traci.lane.getPendingVehicles(l))
         halting_count = traci.lane.getLastStepHaltingNumber(l) + pending_count
-        count_val = (halting_count)** 2
+        current_halt_count += halting_count
         
-        reward -= count_val
-        count_part_total -= count_val
+        if mode == "square":
+            count_val = (halting_count)** 2
+            reward -= count_val
+            count_part_total -= count_val
 
-    # reward = -np.sqrt(max(0, -reward))
+    if mode == "delta":
+        reward = prev_halt_count - current_halt_count
+        count_part_total = reward
 
     if return_components:
-        return reward, 0.0, count_part_total
+        return reward, 0.0, count_part_total, current_halt_count
     return reward
 
 
@@ -87,7 +95,8 @@ class TrafficEnv:
     def __init__(self, sumo_cfg: str | None = None, use_gui: bool = False, port: int = 8813,
                  bernoulli_p: float = 0.05,
                  eval_mode: bool = False, drain_step_cap: int = 200,
-                 scenario: str = "uniform", max_steps: int = config.MAX_STEPS):
+                 scenario: str = "uniform", max_steps: int = config.MAX_STEPS,
+                 reward_mode: str = config.REWARD_MODE):
         """
         SUMO Traffic Signal Control Environment.
         """
@@ -100,6 +109,7 @@ class TrafficEnv:
         self.drain_step_cap = drain_step_cap
         self.max_steps = max_steps
         self.min_green = config.MIN_GREEN
+        self.reward_mode = reward_mode
         
         if scenario not in self.SCENARIOS:
             raise ValueError(f"scenario must be one of {self.SCENARIOS}, got {scenario!r}")
@@ -111,6 +121,7 @@ class TrafficEnv:
         self._green_idx = 0
         self._cum_departed = 0
         self._cum_arrived = 0
+        self._prev_halt_count = 0.0
 
     @property
     def state_size(self) -> int:
@@ -256,6 +267,10 @@ class TrafficEnv:
         # Short warm-up
         for _ in range(5):
             traci.simulationStep()
+        
+        # Initialize prev count for delta reward
+        self._prev_halt_count = sum(traci.lane.getLastStepHaltingNumber(l) + len(traci.lane.getPendingVehicles(l)) for l in self.ALL_LANES)
+        
         return self._get_state()
 
     def step(self, action: int):
@@ -284,9 +299,12 @@ class TrafficEnv:
             self._cum_arrived += traci.simulation.getArrivedNumber()
 
         # Calculate reward and its components
-        reward, wait_sum, count_sum = compute_reward(
-            self.ALL_LANES, self.LEFT_LANES, return_components=True
+        reward, wait_sum, count_sum, current_halt = compute_reward(
+            self.ALL_LANES, self.LEFT_LANES, 
+            mode=self.reward_mode, prev_halt_count=self._prev_halt_count,
+            return_components=True
         )
+        self._prev_halt_count = current_halt
 
         # Apply switching penalty to "let the agent know" that switching is costly
         if switch_occurred:

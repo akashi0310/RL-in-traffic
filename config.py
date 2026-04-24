@@ -9,7 +9,8 @@ LOGS_DIR = os.path.join(BASE_DIR, "logs")
 
 
 # -- RL Settings --
-REWARD_SCALE = 1e-3
+REWARD_SCALE = 1
+REWARD_MODE = "delta"  # "square" or "delta"
 
 # -- Environment Settings --
 STEP_SIZE = 1
